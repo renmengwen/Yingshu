@@ -87,7 +87,7 @@ test("健康检查返回服务状态", async () => {
     const policy = await app.inject({ method: "GET", url: "/api/episode-policy" });
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), { ok: true, service: "narralume" });
+    assert.deepEqual(response.json(), { ok: true, service: "yingshu" });
     assert.deepEqual(policy.json(), {
       ok: true,
       duration: { minimumSeconds: 60, defaultSeconds: 1200, maximumSeconds: 3600, stepSeconds: 30 },

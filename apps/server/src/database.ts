@@ -746,6 +746,27 @@ const MIGRATION_19 = `
   ALTER TABLE series_pipeline_runs DROP COLUMN chapter_concurrency_v19;
 `;
 
+const MIGRATION_20 = `
+  CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at)
+  ) STRICT;
+
+  CREATE TABLE videos (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+    status TEXT NOT NULL CHECK (status = 'draft'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at)
+  ) STRICT;
+
+  CREATE INDEX videos_project_order
+    ON videos(project_id, updated_at DESC, id);
+`;
+
 const MIGRATIONS = [
   MIGRATION_1, MIGRATION_2, MIGRATION_3, MIGRATION_4, MIGRATION_5, MIGRATION_6, MIGRATION_7, MIGRATION_8,
   MIGRATION_9,
@@ -759,6 +780,7 @@ const MIGRATIONS = [
   MIGRATION_17,
   MIGRATION_18,
   MIGRATION_19,
+  MIGRATION_20,
 ];
 
 export interface YingshuDatabase {

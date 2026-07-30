@@ -105,7 +105,7 @@ test("设置页按服务端标题和版本展示只读产品级提示词", () =>
   } }));
 
   assert.match(html, /产品级提示词/);
-  assert.match(html, /所有书籍与系列任务共用/);
+  assert.match(html, /所有项目与视频任务共用/);
   assert.match(html, /product-prompts-v1/);
   assert.match(html, /章节分析/);
   assert.match(html, /chapter-analysis-v1/);

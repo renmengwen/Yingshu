@@ -73,6 +73,7 @@ import { createOpenAiEpisodeScriptGenerator } from "./episode-script-provider.js
 import { createJob, getJob, requestJobCancellation } from "./job-store.js";
 import { JobWorker, type JobExecutionContext, type JobHandler, type JobWorkerOptions } from "./job-worker.js";
 import { registerModelConfigRoutes } from "./model-config-routes.js";
+import { registerProjectVideoRoutes } from "./project-video-routes.js";
 import {
   readModelConfig,
   resolveRuntimeModelConfig,
@@ -543,10 +544,11 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   app.get("/api/health", async () => ({
     ok: true,
-    service: "narralume",
+    service: "yingshu",
   }));
 
   void app.register(registerModelConfigRoutes, { dataRoot });
+  void app.register(registerProjectVideoRoutes, { database: connection.database });
   void app.register(registerBookRoutes, { database: connection.database, dataRoot });
   void app.register(registerChapterRoutes, { database: connection.database });
   void app.register(registerExportRoutes, { database: connection.database, dataRoot });

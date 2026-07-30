@@ -41,7 +41,7 @@ export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
 };
 
 export const MODEL_TYPE_INFO: Record<ModelType, { title: string; placeholder: string; help?: string }> = {
-  text: { title: "分析与改编", placeholder: "gpt-4o-mini / deepseek-chat", help: "章节分析、跨章选材和长稿生成读取这里。" },
+  text: { title: "分析与改编", placeholder: "gpt-4o-mini / deepseek-chat", help: "内容分析、资料整理和文案生成读取这里。" },
   image: { title: "图片生成", placeholder: "seedream-4-0 / gpt-image-2", help: "北派真实视觉资产生产读取这里。" },
   tts: { title: "TTS 语音合成", placeholder: "node-edge-tts / speech-2.8-hd", help: "短样校准与完整时间轴读取这里。" },
 };

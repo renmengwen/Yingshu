@@ -165,7 +165,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
 
         {section === "models" ? <div className={`mx-7 mt-5 rounded border px-4 py-3 text-sm ${statusClasses[statusTone]}`} role={statusTone === "error" ? "alert" : "status"} aria-live="polite">{status}</div> : null}
         <div className="mx-7 mt-3 flex min-h-12 items-center justify-between gap-4 border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-4 py-2 text-sm text-[var(--fg-secondary)] max-md:flex-col max-md:items-start">
-          <span>全局设置由书库与系列工作台共用，不属于七个制作阶段。</span>
+          <span>全局设置由项目和视频工作台共用，不属于当前视频的制作阶段。</span>
           {dirty ? <span className="font-semibold text-amber-700 dark:text-amber-200">模型配置有未保存的修改</span> : <span className="font-mono text-[11px]">入口：顶栏「设置」</span>}
         </div>
 

@@ -1,57 +1,36 @@
 @import "tailwindcss";
+@import "../../../opendesign/design-systems/narralume-product/tokens/colors_and_type.css";
 
 :root,
 :root[data-theme="light"] {
-  color-scheme: light;
-  --bg-canvas: #f4efe6;
-  --bg-surface: #fbf8f2;
-  --bg-subtle: #eee8de;
-  --bg-hover: #e8e0d5;
-  --fg-primary: #1c1a17;
-  --fg-secondary: #4f4941;
-  --fg-tertiary: #6a6258;
-  --border-subtle: #d8cec0;
-  --border-strong: #aaa092;
-  --accent: #98511b;
-  --accent-strong: #7d4015;
-  --accent-contrast: #fbf8f2;
-  --focus: #a95b20;
-  --danger: #a23f36;
-  --danger-soft: #f3d9d4;
-  --shadow: 0 16px 40px rgb(62 52 38 / 8%);
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg-canvas: #1c1a17;
-  --bg-surface: #24211d;
-  --bg-subtle: #2b2722;
-  --bg-hover: #302b25;
-  --fg-primary: #f1eadf;
-  --fg-secondary: #c8bcad;
-  --fg-tertiary: #9e9385;
-  --border-subtle: #403a33;
-  --border-strong: #675e53;
-  --accent: #e3a667;
-  --accent-strong: #efbd87;
-  --accent-contrast: #211e1a;
-  --focus: #e3a667;
-  --danger: #df8b80;
-  --danger-soft: #432a27;
-  --shadow: 0 18px 48px rgb(0 0 0 / 28%);
+  /* 旧生产组件仍消费这些名称；新页面直接使用 canonical token。 */
+  --bg-canvas: var(--surface-canvas);
+  --bg-surface: var(--surface-primary);
+  --bg-primary: var(--surface-primary);
+  --bg-subtle: var(--surface-secondary);
+  --bg-hover: var(--surface-raised);
+  --bg-inset: var(--surface-inset);
+  --fg-tertiary: var(--fg-muted);
+  --accent: var(--accent-primary);
+  --accent-strong: var(--accent-hover);
+  --accent-contrast: var(--fg-inverse);
+  --focus: var(--focus-ring);
+  --danger: var(--status-danger);
+  --danger-soft: var(--status-danger-soft);
+  --shadow: var(--shadow-raised);
 }
 
 * { box-sizing: border-box; }
 
 :root {
-  font-family: Aptos, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   background: var(--bg-canvas);
   color: var(--fg-primary);
 }
 
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+body { margin: 0; min-width: 0; min-height: 100vh; }
 button, input { font: inherit; }
 button:focus-visible, label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 

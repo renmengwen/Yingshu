@@ -35,7 +35,7 @@ export function ProductPromptList({ promptSet }: { promptSet: ProductPromptSet }
       <div className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-4 py-3 max-md:flex-col">
         <div>
           <h2 id="product-prompts-heading" className="m-0 text-lg font-semibold">产品级提示词</h2>
-          <p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">所有书籍与系列任务共用。提示词随产品版本发布，只读展示，不能覆盖运行合同、安全边界或审批门禁。</p>
+          <p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">所有项目与视频任务共用。提示词随产品版本发布，只读展示，不能覆盖运行合同、安全边界或审批门禁。</p>
         </div>
         <span className="whitespace-nowrap font-mono text-xs text-[var(--fg-tertiary)]">{promptSet.setVersion}</span>
       </div>
