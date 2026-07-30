@@ -1,0 +1,19 @@
+{
+  "name": "yingshu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地优先的旁白配图内容讲解视频工作台",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "restart": "node scripts/dev.mjs --restart",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

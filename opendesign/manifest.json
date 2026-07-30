@@ -1,0 +1,46 @@
+{
+  "generated": "2026-07-26T16:44:58.0937066Z",
+  "sections": [
+    {
+      "id": "mockups",
+      "label": "Mockups",
+      "groups": [
+        {
+          "slug": "model-settings-center",
+          "files": [
+            { "label": "index.html", "path": "mockups/model-settings-center/index.html" }
+          ]
+        },
+        {
+          "slug": "narralume-library",
+          "files": [
+            { "label": "workspace.html", "path": "mockups/narralume-library/workspace.html" }
+          ]
+        },
+        {
+          "slug": "series-production-workspace",
+          "files": [
+            { "label": "index.html", "path": "mockups/series-production-workspace/index.html" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": [
+        {
+          "slug": "narralume-product",
+          "files": [
+            { "label": "brand/style-notes.md", "path": "design-systems/narralume-product/brand/style-notes.md" },
+            { "label": "brand/voice-and-tone.md", "path": "design-systems/narralume-product/brand/voice-and-tone.md" },
+            { "label": "README.md", "path": "design-systems/narralume-product/README.md" },
+            { "label": "SKILL.md", "path": "design-systems/narralume-product/SKILL.md" },
+            { "label": "tokens/colors_and_type.css", "path": "design-systems/narralume-product/tokens/colors_and_type.css" },
+            { "label": "ui-kit-narralume/index.html", "path": "design-systems/narralume-product/ui-kit-narralume/index.html" }
+          ]
+        }
+      ]
+    }
+  ]
+}

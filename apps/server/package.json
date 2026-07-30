@@ -1,0 +1,39 @@
+{
+  "name": "@yingshu/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "gate:phase1-large-text": "tsx src/gates/phase1-large-text-gate.ts",
+    "gate:p2-checkpoint-recovery": "tsx src/gates/p2-checkpoint-recovery-gate.ts",
+    "gate:p2-real-chapter-jobs": "tsx src/gates/p2-real-chapter-jobs-gate.ts",
+    "gate:p3-real-episode": "tsx src/gates/p3-real-episode-gate.ts",
+    "gate:p4-system-tts": "tsx src/gates/p4-system-tts-gate.ts",
+    "gate:p4-tts-timeline": "tsx src/gates/p4-tts-timeline-gate.ts",
+    "gate:p4-placeholder-video": "tsx src/gates/p4-placeholder-video-gate.ts",
+    "gate:p5-assets": "tsx src/gates/p5-assets-gate.ts",
+    "gate:p5-image-candidates": "node --no-warnings --import tsx src/gates/p5-image-candidates-gate.ts",
+    "gate:p5-visual-segments": "node --no-warnings --import tsx src/gates/p5-visual-segments-gate.ts",
+    "gate:p5-contact-sheet": "node --no-warnings --import tsx src/gates/p5-contact-sheet-gate.ts",
+    "gate:p6-nine-sixteen-template": "node --no-warnings --import tsx src/gates/p6-nine-sixteen-template-gate.ts",
+    "gate:p6-render-chunks": "node --no-warnings --import tsx src/gates/p6-render-chunks-gate.ts",
+    "gate:p6-final-video": "node --no-warnings --import tsx src/gates/p6-final-video-gate.ts",
+    "gate:p6-render-recovery": "node --no-warnings --import tsx src/gates/p6-render-recovery-gate.ts",
+    "gate:p7-real-sample": "node --no-warnings --import tsx src/gates/p7-real-sample-gate.ts",
+    "gate:p7-project-recovery": "node --no-warnings --import tsx src/gates/p7-project-recovery-gate.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "fastify": "^5.6.0",
+    "node-edge-tts": "1.2.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
