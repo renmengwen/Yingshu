@@ -1,5 +1,6 @@
 import { CreateForm } from "./CreateForm";
 import { formatUpdatedAt, videoPath } from "./logic";
+import { ProjectCreativeSettings } from "./ProjectCreativeSettings";
 import { ProjectShell, StatusStrip } from "./ProjectShell";
 import type { PageCommonProps } from "./types";
 import { useProject } from "./use-project-data";
@@ -11,6 +12,7 @@ export function ProjectPage(props: PageCommonProps & { projectId: string }) {
   return <ProjectShell {...props} title={state.project?.name ?? "正在打开项目"} description="管理本项目的草稿视频。">
     <StatusStrip message={state.status} busy={!state.loaded || state.busy} error={failed} />
     <div className="flex border-b border-[var(--border-subtle)] px-5 py-3 md:px-7"><button className="min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm font-semibold hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={() => props.navigate("/")}>返回首页</button></div>
+    {state.project ? <ProjectCreativeSettings key={props.projectId} projectId={props.projectId} /> : null}
     {state.project ? <CreateForm kind="视频" busy={state.busy} onSubmit={state.createVideo} /> : null}
     <section className="p-5 md:p-7" aria-labelledby="videos-heading">
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3"><h2 id="videos-heading" className="text-base font-semibold">视频列表</h2><span className="font-mono text-xs text-[var(--fg-tertiary)]">{state.videos?.length ?? 0}</span></div>

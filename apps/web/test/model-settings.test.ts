@@ -12,7 +12,11 @@ import {
   updateProviderModel,
   type ModelConfig,
 } from "../src/settings/model-settings.ts";
-import { ProductPromptList } from "../src/settings/ProductPromptSettings.tsx";
+import {
+  normalizeProductPromptInstructions,
+  ProductPromptSettings,
+  validateProductPromptInstructions,
+} from "../src/settings/ProductPromptSettings.tsx";
 
 function config(): ModelConfig {
   return {
@@ -96,18 +100,18 @@ test("模型设置复用 MuseDock 的供应商草稿和按模式配置逻辑", (
   assert.equal(sixth.active.image, "");
 });
 
-test("设置页按服务端标题和版本展示只读产品级提示词", () => {
-  const html = renderToString(createElement(ProductPromptList, { promptSet: {
-    setVersion: "product-prompts-v1",
-    titles: { chapterAnalysis: "章节分析" },
-    versions: { chapterAnalysis: "chapter-analysis-v1" },
-    prompts: { chapterAnalysis: "只提取有来源的结构化事件。" },
-  } }));
+test("全局创作补充展示可编辑字段且不暴露旧书籍提示词", () => {
+  const html = renderToString(createElement(ProductPromptSettings));
 
-  assert.match(html, /产品级提示词/);
-  assert.match(html, /所有项目与视频任务共用/);
-  assert.match(html, /product-prompts-v1/);
-  assert.match(html, /章节分析/);
-  assert.match(html, /chapter-analysis-v1/);
-  assert.match(html, /只提取有来源的结构化事件/);
+  assert.match(html, /全局创作补充/);
+  assert.match(html, /全局文案补充/);
+  assert.match(html, /全局画面补充/);
+  assert.match(html, /固定系统合同和安全边界/);
+  assert.doesNotMatch(html, /章节分析|全书世界观|逐集局部规划|本书专属/);
+});
+
+test("全局创作补充按 Unicode code point 校验并统一换行", () => {
+  assert.equal(normalizeProductPromptInstructions("  第一行\r\n第二行\r  "), "第一行\n第二行");
+  assert.equal(validateProductPromptInstructions("😀".repeat(20_000), "全局文案补充"), undefined);
+  assert.match(validateProductPromptInstructions("文".repeat(20_001), "全局文案补充") ?? "", /不能超过 20,000 个字符/);
 });

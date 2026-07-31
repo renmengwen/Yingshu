@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { isSettingsSearch, resolveTheme, resolveThemePreference, type ThemePreference, withoutSettingsSearch, withSettingsSearch } from "./client-logic";
+import { confirmUnsavedNavigation, isSettingsSearch, resolveTheme, resolveThemePreference, type ThemePreference, withoutSettingsSearch, withSettingsSearch } from "./client-logic";
 import { ProjectHomePage } from "./projects/ProjectHomePage";
 import { ProjectPage } from "./projects/ProjectPage";
 import { parseAppRoute } from "./projects/logic";
@@ -12,6 +12,7 @@ export function App() {
     resolveThemePreference(localStorage.getItem("yingshu-theme")),
   );
   const [locationKey, setLocationKey] = useState(0);
+  const restoringHistoryRef = useRef(false);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -29,12 +30,26 @@ export function App() {
   }, [themePreference]);
 
   useEffect(() => {
-    const syncLocation = () => setLocationKey((current) => current + 1);
+    const syncLocation = () => {
+      if (restoringHistoryRef.current) {
+        restoringHistoryRef.current = false;
+        setLocationKey((current) => current + 1);
+        return;
+      }
+      if (!confirmUnsavedNavigation(window)) {
+        // 用户取消浏览器前进/后退时，回到刚才的历史记录，避免静默丢失草稿。
+        restoringHistoryRef.current = true;
+        window.history.forward();
+        return;
+      }
+      setLocationKey((current) => current + 1);
+    };
     window.addEventListener("popstate", syncLocation);
     return () => window.removeEventListener("popstate", syncLocation);
   }, []);
 
-  const navigate = useCallback((path: string) => {
+  const navigate = useCallback((path: string, discardUnsaved = false) => {
+    if (!discardUnsaved && !confirmUnsavedNavigation(window)) return;
     window.history.pushState(null, "", path);
     setLocationKey((current) => current + 1);
   }, []);
@@ -43,8 +58,8 @@ export function App() {
     navigate(`${window.location.pathname}${withSettingsSearch(window.location.search)}`);
   }, [navigate]);
 
-  const closeSettings = useCallback(() => {
-    navigate(`${window.location.pathname}${withoutSettingsSearch(window.location.search)}`);
+  const closeSettings = useCallback((discardUnsaved = false) => {
+    navigate(`${window.location.pathname}${withoutSettingsSearch(window.location.search)}`, discardUnsaved);
   }, [navigate]);
 
   if (isSettingsSearch(window.location.search)) return <ModelSettingsPage onBack={closeSettings} />;

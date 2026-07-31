@@ -22,6 +22,7 @@ import {
 } from "../src/production/audio/audio-editor.ts";
 import {
   chapterPagePath,
+  confirmUnsavedNavigation,
   isSettingsSearch,
   resolveTheme,
   resolveThemePreference,
@@ -110,6 +111,15 @@ test("设置地址可叠加在书库或系列工作台并兼容旧模型设置�
   assert.equal(withSettingsSearch("?book=book_1&series=series_1"), "?book=book_1&series=series_1&settings=global");
   assert.equal(withoutSettingsSearch("?book=book_1&series=series_1&settings=global"), "?book=book_1&series=series_1");
   assert.equal(withoutSettingsSearch("?settings=global"), "");
+});
+
+test("应用内导航与浏览器历史导航都会尊重未保存修改", () => {
+  let confirmations = 0;
+  assert.equal(confirmUnsavedNavigation({ dispatchEvent: () => true, confirm: () => { confirmations += 1; return false; } }), true);
+  assert.equal(confirmations, 0);
+  assert.equal(confirmUnsavedNavigation({ dispatchEvent: () => false, confirm: () => { confirmations += 1; return false; } }), false);
+  assert.equal(confirmUnsavedNavigation({ dispatchEvent: () => false, confirm: () => { confirmations += 1; return true; } }), true);
+  assert.equal(confirmations, 2);
 });
 
 test("生产工作台恢复阶段、章节和任务且拒绝坏阶段", () => {

@@ -27,7 +27,7 @@ import {
 import { ProductPromptSettings } from "./ProductPromptSettings";
 
 interface ModelSettingsPageProps {
-  onBack: () => void;
+  onBack: (discardUnsaved?: boolean) => void;
 }
 
 export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
@@ -39,6 +39,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [promptDirty, setPromptDirty] = useState(false);
   const [confirmation, setConfirmation] = useState<
     { type: "delete-provider"; provider: ModelProvider } | { type: "leave" }
   >();
@@ -64,15 +65,17 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
     return () => { cancelled = true; };
   }, []);
 
+  const hasDirty = dirty || promptDirty;
+
   useEffect(() => {
-    if (!dirty) return undefined;
+    if (!hasDirty) return undefined;
     const handler = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  }, [hasDirty]);
 
   const providers = useMemo(() => config ? providerList(config) : [], [config]);
   const selectedProvider = config?.providers[selectedProviderId] ?? providers[0];
@@ -137,7 +140,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
   }
 
   function back() {
-    if (dirty) setConfirmation({ type: "leave" });
+    if (hasDirty) setConfirmation({ type: "leave" });
     else onBack();
   }
 
@@ -155,7 +158,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
           <div>
             <p className="mb-2 font-mono text-[11px] font-semibold tracking-[.17em] text-[var(--accent)]">映述 / 全局设置</p>
             <h1 className="m-0 text-3xl font-semibold">设置</h1>
-            <p className="mt-2 text-sm text-[var(--fg-secondary)]">管理模型、产品级提示词及后续全局配置。</p>
+            <p className="mt-2 text-sm text-[var(--fg-secondary)]">管理模型与后续生成使用的全局创作补充。</p>
           </div>
           <div className="flex gap-2 max-md:w-full">
             <button className="min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm text-[var(--fg-secondary)] hover:bg-[var(--bg-subtle)] max-md:flex-1" type="button" onClick={back}>返回上一页</button>
@@ -166,11 +169,11 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
         {section === "models" ? <div className={`mx-7 mt-5 rounded border px-4 py-3 text-sm ${statusClasses[statusTone]}`} role={statusTone === "error" ? "alert" : "status"} aria-live="polite">{status}</div> : null}
         <div className="mx-7 mt-3 flex min-h-12 items-center justify-between gap-4 border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-4 py-2 text-sm text-[var(--fg-secondary)] max-md:flex-col max-md:items-start">
           <span>全局设置由项目和视频工作台共用，不属于当前视频的制作阶段。</span>
-          {dirty ? <span className="font-semibold text-amber-700 dark:text-amber-200">模型配置有未保存的修改</span> : <span className="font-mono text-[11px]">入口：顶栏「设置」</span>}
+          {hasDirty ? <span className="font-semibold text-amber-700 dark:text-amber-200">当前设置有未保存的修改</span> : <span className="font-mono text-[11px]">入口：顶栏「设置」</span>}
         </div>
 
         <nav className="mx-7 mt-5 flex gap-1 border-b border-[var(--border-subtle)] max-md:mx-4" aria-label="设置分类">
-          {([['models', '模型配置'], ['prompts', '产品级提示词']] as const).map(([id, label]) => <button key={id} type="button" aria-current={section === id ? "page" : undefined} onClick={() => setSection(id)} className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${section === id ? "border-[var(--accent)] text-[var(--fg-primary)]" : "border-transparent text-[var(--fg-secondary)] hover:bg-[var(--bg-subtle)]"}`}>{label}</button>)}
+          {([['models', '模型配置'], ['prompts', '全局创作补充']] as const).map(([id, label]) => <button key={id} type="button" aria-current={section === id ? "page" : undefined} onClick={() => setSection(id)} className={`min-h-11 border-b-2 px-4 text-sm font-semibold ${section === id ? "border-[var(--accent)] text-[var(--fg-primary)]" : "border-transparent text-[var(--fg-secondary)] hover:bg-[var(--bg-subtle)]"}`}>{label}</button>)}
         </nav>
 
         {section === "models" ? <section className="grid grid-cols-[240px_minmax(0,1fr)] gap-0 px-7 py-6 max-lg:grid-cols-1 max-md:px-4">
@@ -227,14 +230,15 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
               <div className="border border-[var(--border-subtle)] p-8 text-sm text-[var(--fg-secondary)]">{loading ? "正在读取模型配置…" : "模型配置暂不可用。"}</div>
             )}
           </div>
-        </section> : <div className="px-7 py-6 max-md:px-4"><ProductPromptSettings /></div>}
+        </section> : null}
+        <div className={section === "prompts" ? "px-7 py-6 max-md:px-4" : "hidden"}><ProductPromptSettings onDirtyChange={setPromptDirty} /></div>
         <AlertDialog open={!!confirmation} onOpenChange={(open) => { if (!open) setConfirmation(undefined); }}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{confirmation?.type === "leave" ? "放弃未保存的修改？" : "删除这个供应商？"}</AlertDialogTitle>
               <AlertDialogDescription>
                 {confirmation?.type === "leave"
-                  ? "返回后，本页尚未保存的模型配置将丢失。"
+                  ? "返回后，本页尚未保存的设置修改将丢失。"
                   : `供应商“${confirmation?.provider.name || confirmation?.provider.id}”将从页面草稿中删除；点击顶部“保存模型配置”后才会持久化。`}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -243,7 +247,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
               <AlertDialogAction onClick={() => {
                 const pending = confirmation;
                 setConfirmation(undefined);
-                if (pending?.type === "leave") onBack();
+                if (pending?.type === "leave") onBack(true);
                 else if (pending?.type === "delete-provider") confirmDeleteProvider(pending.provider);
               }}>{confirmation?.type === "leave" ? "放弃修改并返回" : "删除供应商"}</AlertDialogAction>
             </AlertDialogFooter>

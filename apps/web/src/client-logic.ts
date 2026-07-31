@@ -45,6 +45,11 @@ export function withoutSettingsSearch(search: string) {
   return value ? `?${value}` : "";
 }
 
+export function confirmUnsavedNavigation(target: Pick<Window, "confirm" | "dispatchEvent">) {
+  const event = new Event("beforeunload", { cancelable: true });
+  return target.dispatchEvent(event) || target.confirm("当前页面有未保存的修改，确定放弃并离开吗？");
+}
+
 export async function responseJson<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json")
