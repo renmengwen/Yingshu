@@ -767,6 +767,783 @@ const MIGRATION_20 = `
     ON videos(project_id, updated_at DESC, id);
 `;
 
+const MIGRATION_21 = `
+  ALTER TABLE projects ADD COLUMN script_instructions TEXT NOT NULL DEFAULT ''
+    CHECK (length(script_instructions) <= 20000);
+  ALTER TABLE projects ADD COLUMN visual_instructions TEXT NOT NULL DEFAULT ''
+    CHECK (length(visual_instructions) <= 20000);
+
+  ALTER TABLE videos ADD COLUMN input_mode TEXT NOT NULL DEFAULT 'topic'
+    CHECK (input_mode IN ('topic', 'body'));
+  ALTER TABLE videos ADD COLUMN topic TEXT NOT NULL DEFAULT ''
+    CHECK (length(topic) <= 200);
+  ALTER TABLE videos ADD COLUMN body TEXT NOT NULL DEFAULT ''
+    CHECK (length(CAST(body AS BLOB)) <= 131072);
+  ALTER TABLE videos ADD COLUMN reference_text TEXT NOT NULL DEFAULT ''
+    CHECK (length(CAST(reference_text AS BLOB)) <= 65536);
+  ALTER TABLE videos ADD COLUMN reference_role TEXT NOT NULL DEFAULT 'style_only'
+    CHECK (reference_role IN ('style_only', 'content_source'));
+  ALTER TABLE videos ADD COLUMN target_duration_seconds INTEGER NOT NULL DEFAULT 180
+    CHECK (target_duration_seconds BETWEEN 60 AND 600);
+  ALTER TABLE videos ADD COLUMN visual_density TEXT NOT NULL DEFAULT 'standard'
+    CHECK (visual_density IN ('relaxed', 'standard', 'compact'));
+  ALTER TABLE videos ADD COLUMN web_enabled INTEGER NOT NULL DEFAULT 1
+    CHECK (web_enabled IN (0, 1));
+  ALTER TABLE videos ADD COLUMN script_instructions TEXT NOT NULL DEFAULT ''
+    CHECK (length(script_instructions) <= 20000);
+  ALTER TABLE videos ADD COLUMN visual_instructions TEXT NOT NULL DEFAULT ''
+    CHECK (length(visual_instructions) <= 20000);
+
+  CREATE TABLE global_prompt_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    script_instructions TEXT NOT NULL CHECK (length(script_instructions) <= 20000),
+    visual_instructions TEXT NOT NULL CHECK (length(visual_instructions) <= 20000),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= 0)
+  ) STRICT;
+  INSERT INTO global_prompt_settings (id, script_instructions, visual_instructions, updated_at)
+    VALUES (1, '', '', 0);
+`;
+
+const MIGRATION_22 = `
+  CREATE TABLE videos_v22 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+    status TEXT NOT NULL CHECK (status IN (
+      'draft', 'preparing_sources', 'generating_script', 'planning_visuals',
+      'awaiting_review', 'failed', 'cancelled'
+    )),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    input_mode TEXT NOT NULL DEFAULT 'topic' CHECK (input_mode IN ('topic', 'body')),
+    topic TEXT NOT NULL DEFAULT '' CHECK (length(topic) <= 200),
+    body TEXT NOT NULL DEFAULT '' CHECK (length(CAST(body AS BLOB)) <= 131072),
+    reference_text TEXT NOT NULL DEFAULT '' CHECK (length(CAST(reference_text AS BLOB)) <= 65536),
+    reference_role TEXT NOT NULL DEFAULT 'style_only' CHECK (reference_role IN ('style_only', 'content_source')),
+    target_duration_seconds INTEGER NOT NULL DEFAULT 180 CHECK (target_duration_seconds BETWEEN 60 AND 600),
+    visual_density TEXT NOT NULL DEFAULT 'standard' CHECK (visual_density IN ('relaxed', 'standard', 'compact')),
+    web_enabled INTEGER NOT NULL DEFAULT 1 CHECK (web_enabled IN (0, 1)),
+    script_instructions TEXT NOT NULL DEFAULT '' CHECK (length(script_instructions) <= 20000),
+    visual_instructions TEXT NOT NULL DEFAULT '' CHECK (length(visual_instructions) <= 20000)
+  ) STRICT;
+
+  INSERT INTO videos_v22 (
+    id, project_id, title, status, created_at, updated_at, input_mode, topic, body,
+    reference_text, reference_role, target_duration_seconds, visual_density, web_enabled,
+    script_instructions, visual_instructions
+  ) SELECT
+    id, project_id, title, status, created_at, updated_at, input_mode, topic, body,
+    reference_text, reference_role, target_duration_seconds, visual_density, web_enabled,
+    script_instructions, visual_instructions
+  FROM videos;
+  DROP TABLE videos;
+  ALTER TABLE videos_v22 RENAME TO videos;
+  CREATE INDEX videos_project_order ON videos(project_id, updated_at DESC, id);
+
+  CREATE TABLE video_plan_snapshots (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) > 0),
+    input_json TEXT NOT NULL CHECK (length(input_json) > 0 AND json_valid(input_json)),
+    prompt_json TEXT NOT NULL CHECK (length(prompt_json) > 0 AND json_valid(prompt_json)),
+    model_json TEXT NOT NULL CHECK (length(model_json) > 0 AND json_valid(model_json)),
+    system_contract_version TEXT NOT NULL CHECK (length(system_contract_version) > 0),
+    web_capability TEXT NOT NULL CHECK (length(web_capability) > 0),
+    canonical_json TEXT NOT NULL CHECK (length(canonical_json) > 0 AND json_valid(canonical_json)),
+    snapshot_hash TEXT NOT NULL CHECK (length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    invalidated_at INTEGER CHECK (invalidated_at IS NULL OR invalidated_at >= created_at),
+    UNIQUE (video_id, idempotency_key),
+    UNIQUE (id, video_id)
+  ) STRICT;
+
+  CREATE TABLE video_plan_jobs (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_plan_snapshots(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_plan_sources (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    source_index INTEGER NOT NULL CHECK (source_index >= 0),
+    query TEXT NOT NULL CHECK (length(query) > 0),
+    provider TEXT NOT NULL CHECK (length(provider) > 0),
+    tool TEXT NOT NULL CHECK (length(tool) > 0),
+    retrieved_at INTEGER NOT NULL CHECK (retrieved_at >= 0),
+    url TEXT NOT NULL CHECK (length(url) > 0),
+    title TEXT NOT NULL CHECK (length(title) > 0),
+    usage_summary TEXT NOT NULL,
+    audit_excerpt TEXT NOT NULL,
+    content_hash TEXT NOT NULL CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    failure_summary TEXT,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (snapshot_id, source_index),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_plan_snapshots(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_script_revisions (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    content_json TEXT NOT NULL CHECK (length(content_json) > 0 AND json_valid(content_json)),
+    content_hash TEXT NOT NULL CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    provider_id TEXT NOT NULL CHECK (length(provider_id) > 0),
+    model_id TEXT NOT NULL CHECK (length(model_id) > 0),
+    prompt_version TEXT NOT NULL CHECK (length(prompt_version) > 0),
+    prompt_hash TEXT NOT NULL CHECK (length(prompt_hash) = 64 AND prompt_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    UNIQUE (id, video_id, snapshot_id, content_hash),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_plan_snapshots(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_visual_revisions (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    content_json TEXT NOT NULL CHECK (length(content_json) > 0 AND json_valid(content_json)),
+    content_hash TEXT NOT NULL CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    UNIQUE (id, video_id, snapshot_id, content_hash),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_plan_snapshots(id, video_id) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_plan_approvals (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    script_revision_id TEXT NOT NULL,
+    visual_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_content_hash TEXT NOT NULL CHECK (length(visual_content_hash) = 64 AND visual_content_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_plan_snapshots(id, video_id) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (visual_revision_id, video_id, snapshot_id, visual_content_hash)
+      REFERENCES video_visual_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  -- 冻结快照只允许首次写入失效时间；生成与审核必须始终引用原始身份。
+  CREATE TRIGGER video_plan_snapshots_immutable BEFORE UPDATE ON video_plan_snapshots
+  WHEN OLD.id IS NOT NEW.id OR OLD.video_id IS NOT NEW.video_id OR OLD.idempotency_key IS NOT NEW.idempotency_key
+    OR OLD.input_json IS NOT NEW.input_json OR OLD.prompt_json IS NOT NEW.prompt_json OR OLD.model_json IS NOT NEW.model_json
+    OR OLD.system_contract_version IS NOT NEW.system_contract_version OR OLD.web_capability IS NOT NEW.web_capability
+    OR OLD.canonical_json IS NOT NEW.canonical_json OR OLD.snapshot_hash IS NOT NEW.snapshot_hash
+    OR OLD.created_at IS NOT NEW.created_at OR OLD.invalidated_at IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, 'video plan snapshot is immutable'); END;
+  CREATE TRIGGER video_plan_snapshots_no_delete BEFORE DELETE ON video_plan_snapshots
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video plan snapshot is immutable'); END;
+
+  CREATE TRIGGER video_script_revisions_immutable BEFORE UPDATE ON video_script_revisions
+  BEGIN SELECT RAISE(ABORT, 'video script revisions are append-only'); END;
+  CREATE TRIGGER video_script_revisions_no_delete BEFORE DELETE ON video_script_revisions
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video script revisions are append-only'); END;
+  CREATE TRIGGER video_visual_revisions_immutable BEFORE UPDATE ON video_visual_revisions
+  BEGIN SELECT RAISE(ABORT, 'video visual revisions are append-only'); END;
+  CREATE TRIGGER video_visual_revisions_no_delete BEFORE DELETE ON video_visual_revisions
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video visual revisions are append-only'); END;
+  CREATE TRIGGER video_plan_approvals_immutable BEFORE UPDATE ON video_plan_approvals
+  BEGIN SELECT RAISE(ABORT, 'video plan approvals are append-only'); END;
+  CREATE TRIGGER video_plan_approvals_no_delete BEFORE DELETE ON video_plan_approvals
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video plan approvals are append-only'); END;
+`;
+
+const MIGRATION_23 = `
+  DROP TRIGGER video_plan_snapshots_immutable;
+  DROP TRIGGER video_plan_snapshots_no_delete;
+  DROP TRIGGER video_script_revisions_immutable;
+  DROP TRIGGER video_script_revisions_no_delete;
+  DROP TRIGGER video_visual_revisions_immutable;
+  DROP TRIGGER video_visual_revisions_no_delete;
+  DROP TRIGGER video_plan_approvals_immutable;
+  DROP TRIGGER video_plan_approvals_no_delete;
+
+  CREATE TABLE videos_v23 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+    status TEXT NOT NULL CHECK (status IN (
+      'draft', 'preparing_sources', 'generating_script', 'planning_visuals',
+      'awaiting_review', 'producing_media', 'awaiting_media_review', 'failed', 'cancelled'
+    )),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    input_mode TEXT NOT NULL DEFAULT 'topic' CHECK (input_mode IN ('topic', 'body')),
+    topic TEXT NOT NULL DEFAULT '' CHECK (length(topic) <= 200),
+    body TEXT NOT NULL DEFAULT '' CHECK (length(CAST(body AS BLOB)) <= 131072),
+    reference_text TEXT NOT NULL DEFAULT '' CHECK (length(CAST(reference_text AS BLOB)) <= 65536),
+    reference_role TEXT NOT NULL DEFAULT 'style_only' CHECK (reference_role IN ('style_only', 'content_source')),
+    target_duration_seconds INTEGER NOT NULL DEFAULT 180 CHECK (target_duration_seconds BETWEEN 60 AND 600),
+    visual_density TEXT NOT NULL DEFAULT 'standard' CHECK (visual_density IN ('relaxed', 'standard', 'compact')),
+    web_enabled INTEGER NOT NULL DEFAULT 1 CHECK (web_enabled IN (0, 1)),
+    script_instructions TEXT NOT NULL DEFAULT '' CHECK (length(script_instructions) <= 20000),
+    visual_instructions TEXT NOT NULL DEFAULT '' CHECK (length(visual_instructions) <= 20000),
+    UNIQUE (id, project_id)
+  ) STRICT;
+  INSERT INTO videos_v23 SELECT * FROM videos;
+  DROP TABLE videos;
+  ALTER TABLE videos_v23 RENAME TO videos;
+  CREATE INDEX videos_project_order ON videos(project_id, updated_at DESC, id);
+
+  CREATE TRIGGER video_plan_snapshots_immutable BEFORE UPDATE ON video_plan_snapshots
+  WHEN OLD.id IS NOT NEW.id OR OLD.video_id IS NOT NEW.video_id OR OLD.idempotency_key IS NOT NEW.idempotency_key
+    OR OLD.input_json IS NOT NEW.input_json OR OLD.prompt_json IS NOT NEW.prompt_json OR OLD.model_json IS NOT NEW.model_json
+    OR OLD.system_contract_version IS NOT NEW.system_contract_version OR OLD.web_capability IS NOT NEW.web_capability
+    OR OLD.canonical_json IS NOT NEW.canonical_json OR OLD.snapshot_hash IS NOT NEW.snapshot_hash
+    OR OLD.created_at IS NOT NEW.created_at OR OLD.invalidated_at IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, 'video plan snapshot is immutable'); END;
+  CREATE TRIGGER video_plan_snapshots_no_delete BEFORE DELETE ON video_plan_snapshots
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video plan snapshot is immutable'); END;
+  CREATE TRIGGER video_script_revisions_immutable BEFORE UPDATE ON video_script_revisions
+  BEGIN SELECT RAISE(ABORT, 'video script revisions are append-only'); END;
+  CREATE TRIGGER video_script_revisions_no_delete BEFORE DELETE ON video_script_revisions
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video script revisions are append-only'); END;
+  CREATE TRIGGER video_visual_revisions_immutable BEFORE UPDATE ON video_visual_revisions
+  BEGIN SELECT RAISE(ABORT, 'video visual revisions are append-only'); END;
+  CREATE TRIGGER video_visual_revisions_no_delete BEFORE DELETE ON video_visual_revisions
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video visual revisions are append-only'); END;
+  CREATE TRIGGER video_plan_approvals_immutable BEFORE UPDATE ON video_plan_approvals
+  BEGIN SELECT RAISE(ABORT, 'video plan approvals are append-only'); END;
+  CREATE TRIGGER video_plan_approvals_no_delete BEFORE DELETE ON video_plan_approvals
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video plan approvals are append-only'); END;
+
+  CREATE UNIQUE INDEX video_plan_snapshots_frozen_identity
+    ON video_plan_snapshots(id, video_id, snapshot_hash);
+
+  CREATE TABLE video_image_batches (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    plan_snapshot_id TEXT NOT NULL,
+    plan_snapshot_hash TEXT NOT NULL CHECK (length(plan_snapshot_hash) = 64 AND plan_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_revision_id TEXT NOT NULL,
+    visual_content_hash TEXT NOT NULL CHECK (length(visual_content_hash) = 64 AND visual_content_hash NOT GLOB '*[^0-9a-f]*'),
+    mode TEXT NOT NULL CHECK (mode IN ('batch', 'single', 'retry_failed')),
+    idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) > 0),
+    provider_id TEXT NOT NULL CHECK (length(provider_id) > 0),
+    model_id TEXT NOT NULL CHECK (length(model_id) > 0),
+    planned_count INTEGER NOT NULL CHECK (planned_count >= 1),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, idempotency_key),
+    UNIQUE (id, video_id),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_snapshot_id, video_id, plan_snapshot_hash)
+      REFERENCES video_plan_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, plan_snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (visual_revision_id, video_id, plan_snapshot_id, visual_content_hash)
+      REFERENCES video_visual_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_image_batch_items (
+    batch_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    visual_id TEXT NOT NULL CHECK (length(visual_id) > 0),
+    job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+    request_identity TEXT NOT NULL UNIQUE CHECK (length(request_identity) > 0),
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    PRIMARY KEY (batch_id, visual_id),
+    FOREIGN KEY (batch_id, video_id) REFERENCES video_image_batches(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE UNIQUE INDEX video_image_items_one_active_visual
+    ON video_image_batch_items(video_id, visual_id)
+    WHERE status IN ('queued', 'running');
+  CREATE INDEX video_image_items_batch_status
+    ON video_image_batch_items(batch_id, status, visual_id);
+
+  CREATE TABLE video_image_candidates (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    plan_snapshot_id TEXT NOT NULL,
+    plan_snapshot_hash TEXT NOT NULL CHECK (length(plan_snapshot_hash) = 64 AND plan_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_revision_id TEXT NOT NULL,
+    visual_content_hash TEXT NOT NULL CHECK (length(visual_content_hash) = 64 AND visual_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_id TEXT NOT NULL CHECK (length(visual_id) > 0),
+    prompt TEXT NOT NULL CHECK (length(prompt) > 0),
+    negative_prompt TEXT NOT NULL,
+    style_snapshot_json TEXT NOT NULL CHECK (json_valid(style_snapshot_json)),
+    prompt_hash TEXT NOT NULL CHECK (length(prompt_hash) = 64 AND prompt_hash NOT GLOB '*[^0-9a-f]*'),
+    provider_id TEXT,
+    model_id TEXT,
+    params_json TEXT NOT NULL CHECK (json_valid(params_json)),
+    request_identity TEXT NOT NULL UNIQUE CHECK (length(request_identity) > 0),
+    job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+    attempt INTEGER NOT NULL CHECK (attempt >= 1),
+    checkpoint_scope TEXT NOT NULL CHECK (length(checkpoint_scope) > 0),
+    provider_request_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    error_category TEXT,
+    error_summary TEXT,
+    origin TEXT NOT NULL CHECK (origin IN ('generated', 'upload')),
+    original_file_name TEXT,
+    relative_path TEXT,
+    mime TEXT CHECK (mime IS NULL OR mime IN ('image/png', 'image/jpeg', 'image/webp')),
+    bytes INTEGER CHECK (bytes IS NULL OR bytes > 0),
+    width INTEGER CHECK (width IS NULL OR width > 0),
+    height INTEGER CHECK (height IS NULL OR height > 0),
+    file_hash TEXT CHECK (file_hash IS NULL OR (length(file_hash) = 64 AND file_hash NOT GLOB '*[^0-9a-f]*')),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (id, project_id, video_id, visual_id, file_hash),
+    CHECK ((origin = 'upload' AND provider_id IS NULL AND model_id IS NULL AND job_id IS NULL)
+      OR (origin = 'generated' AND provider_id IS NOT NULL AND model_id IS NOT NULL)),
+    CHECK ((status = 'succeeded' AND error_category IS NULL AND error_summary IS NULL
+      AND relative_path IS NOT NULL AND mime IS NOT NULL AND bytes IS NOT NULL
+      AND width IS NOT NULL AND height IS NOT NULL AND file_hash IS NOT NULL)
+      OR (status = 'failed' AND origin = 'generated' AND error_category IS NOT NULL
+      AND error_summary IS NOT NULL AND relative_path IS NULL AND mime IS NULL
+      AND bytes IS NULL AND width IS NULL AND height IS NULL AND file_hash IS NULL)),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_snapshot_id, video_id, plan_snapshot_hash)
+      REFERENCES video_plan_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, plan_snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (visual_revision_id, video_id, plan_snapshot_id, visual_content_hash)
+      REFERENCES video_visual_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE
+  ) STRICT;
+  CREATE INDEX video_image_candidates_visual_order
+    ON video_image_candidates(video_id, visual_id, created_at, id);
+
+  CREATE TABLE video_image_approval_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    gate_revision INTEGER NOT NULL CHECK (gate_revision >= 1),
+    visual_id TEXT NOT NULL CHECK (length(visual_id) > 0),
+    candidate_id TEXT NOT NULL,
+    plan_snapshot_id TEXT NOT NULL,
+    plan_snapshot_hash TEXT NOT NULL CHECK (length(plan_snapshot_hash) = 64 AND plan_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_revision_id TEXT NOT NULL,
+    visual_content_hash TEXT NOT NULL CHECK (length(visual_content_hash) = 64 AND visual_content_hash NOT GLOB '*[^0-9a-f]*'),
+    prompt_hash TEXT NOT NULL CHECK (length(prompt_hash) = 64 AND prompt_hash NOT GLOB '*[^0-9a-f]*'),
+    candidate_hash TEXT NOT NULL CHECK (length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, gate_revision),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_snapshot_id, video_id, plan_snapshot_hash)
+      REFERENCES video_plan_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, plan_snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (visual_revision_id, video_id, plan_snapshot_id, visual_content_hash)
+      REFERENCES video_visual_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (candidate_id, project_id, video_id, visual_id, candidate_hash)
+      REFERENCES video_image_candidates(id, project_id, video_id, visual_id, file_hash)
+  ) STRICT;
+  CREATE INDEX video_image_approvals_visual_revision
+    ON video_image_approval_events(video_id, visual_id, gate_revision DESC);
+
+  -- 候选与批准都是审计事实；仅允许随所属视频级联清理。
+  CREATE TRIGGER video_image_candidates_immutable BEFORE UPDATE ON video_image_candidates
+  BEGIN SELECT RAISE(ABORT, 'video image candidates are immutable'); END;
+  CREATE TRIGGER video_image_candidates_no_delete BEFORE DELETE ON video_image_candidates
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video image candidates are immutable'); END;
+  CREATE TRIGGER video_image_approvals_immutable BEFORE UPDATE ON video_image_approval_events
+  BEGIN SELECT RAISE(ABORT, 'video image approval events are append-only'); END;
+  CREATE TRIGGER video_image_approvals_no_delete BEFORE DELETE ON video_image_approval_events
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video image approval events are append-only'); END;
+`;
+
+const MIGRATION_24 = `
+  CREATE TABLE video_tts_snapshots (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    plan_snapshot_id TEXT NOT NULL,
+    plan_snapshot_hash TEXT NOT NULL CHECK (length(plan_snapshot_hash) = 64 AND plan_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    paragraphs_json TEXT NOT NULL CHECK (json_valid(paragraphs_json)),
+    provider_id TEXT NOT NULL CHECK (length(provider_id) > 0),
+    provider_name TEXT NOT NULL CHECK (length(provider_name) > 0),
+    provider_kind TEXT NOT NULL CHECK (length(provider_kind) > 0),
+    protocol TEXT NOT NULL CHECK (length(protocol) > 0),
+    base_url TEXT NOT NULL,
+    model_id TEXT NOT NULL CHECK (length(model_id) > 0),
+    voice_id TEXT NOT NULL CHECK (length(voice_id) > 0),
+    rate INTEGER NOT NULL CHECK (rate BETWEEN -10 AND 10),
+    language TEXT NOT NULL CHECK (length(language) > 0),
+    params_json TEXT NOT NULL CHECK (json_valid(params_json)),
+    target_duration_seconds INTEGER NOT NULL CHECK (target_duration_seconds BETWEEN 60 AND 600),
+    system_contract_version TEXT NOT NULL CHECK (length(system_contract_version) > 0),
+    canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
+    snapshot_hash TEXT NOT NULL CHECK (length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    invalidated_at INTEGER CHECK (invalidated_at IS NULL OR invalidated_at >= created_at),
+    UNIQUE (video_id, snapshot_hash),
+    UNIQUE (id, video_id),
+    UNIQUE (id, video_id, snapshot_hash),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_snapshot_id, video_id, plan_snapshot_hash)
+      REFERENCES video_plan_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, plan_snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_tts_jobs (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_tts_snapshots(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE TABLE video_tts_artifacts (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL CHECK (length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE RESTRICT,
+    provider_request_id TEXT,
+    audio_relative_path TEXT NOT NULL CHECK (length(audio_relative_path) > 0),
+    audio_mime TEXT NOT NULL CHECK (audio_mime = 'audio/wav'),
+    audio_codec TEXT NOT NULL CHECK (length(audio_codec) > 0),
+    sample_rate INTEGER NOT NULL CHECK (sample_rate > 0),
+    channels INTEGER NOT NULL CHECK (channels BETWEEN 1 AND 8),
+    audio_bytes INTEGER NOT NULL CHECK (audio_bytes > 0),
+    duration_ms INTEGER NOT NULL CHECK (duration_ms > 0),
+    audio_hash TEXT NOT NULL CHECK (length(audio_hash) = 64 AND audio_hash NOT GLOB '*[^0-9a-f]*'),
+    cues_hash TEXT NOT NULL CHECK (length(cues_hash) = 64 AND cues_hash NOT GLOB '*[^0-9a-f]*'),
+    srt_relative_path TEXT NOT NULL CHECK (length(srt_relative_path) > 0),
+    srt_bytes INTEGER NOT NULL CHECK (srt_bytes > 0),
+    srt_hash TEXT NOT NULL CHECK (length(srt_hash) = 64 AND srt_hash NOT GLOB '*[^0-9a-f]*'),
+    ass_relative_path TEXT NOT NULL CHECK (length(ass_relative_path) > 0),
+    ass_bytes INTEGER NOT NULL CHECK (ass_bytes > 0),
+    ass_hash TEXT NOT NULL CHECK (length(ass_hash) = 64 AND ass_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (snapshot_id),
+    UNIQUE (id, video_id),
+    UNIQUE (id, video_id, snapshot_id, audio_hash, cues_hash, srt_hash, ass_hash),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (snapshot_id, video_id, snapshot_hash)
+      REFERENCES video_tts_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_tts_cues (
+    artifact_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    cue_index INTEGER NOT NULL CHECK (cue_index >= 0),
+    paragraph_id TEXT NOT NULL CHECK (length(paragraph_id) > 0),
+    text TEXT NOT NULL CHECK (length(text) > 0),
+    start_ms INTEGER NOT NULL CHECK (start_ms >= 0),
+    end_ms INTEGER NOT NULL CHECK (end_ms > start_ms),
+    cue_hash TEXT NOT NULL CHECK (length(cue_hash) = 64 AND cue_hash NOT GLOB '*[^0-9a-f]*'),
+    PRIMARY KEY (artifact_id, cue_index),
+    FOREIGN KEY (artifact_id, video_id) REFERENCES video_tts_artifacts(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_audio_review_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    snapshot_id TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL CHECK (length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    artifact_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('approve', 'needs_regeneration')),
+    notes TEXT NOT NULL CHECK (length(notes) <= 10000),
+    duration_decision TEXT NOT NULL CHECK (duration_decision IN ('within_target', 'accept_actual', 'reprocess')),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    voice_id TEXT NOT NULL,
+    rate INTEGER NOT NULL CHECK (rate BETWEEN -10 AND 10),
+    language TEXT NOT NULL,
+    audio_hash TEXT NOT NULL CHECK (length(audio_hash) = 64 AND audio_hash NOT GLOB '*[^0-9a-f]*'),
+    cues_hash TEXT NOT NULL CHECK (length(cues_hash) = 64 AND cues_hash NOT GLOB '*[^0-9a-f]*'),
+    srt_hash TEXT NOT NULL CHECK (length(srt_hash) = 64 AND srt_hash NOT GLOB '*[^0-9a-f]*'),
+    ass_hash TEXT NOT NULL CHECK (length(ass_hash) = 64 AND ass_hash NOT GLOB '*[^0-9a-f]*'),
+    deviation_ratio REAL NOT NULL CHECK (deviation_ratio >= 0),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (snapshot_id, video_id, snapshot_hash)
+      REFERENCES video_tts_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (artifact_id, video_id, snapshot_id, audio_hash, cues_hash, srt_hash, ass_hash)
+      REFERENCES video_tts_artifacts(id, video_id, snapshot_id, audio_hash, cues_hash, srt_hash, ass_hash)
+  ) STRICT;
+
+  CREATE INDEX video_tts_snapshots_video_created ON video_tts_snapshots(video_id, created_at DESC);
+  CREATE INDEX video_tts_cues_video_order ON video_tts_cues(video_id, artifact_id, cue_index);
+  CREATE INDEX video_audio_reviews_video_revision ON video_audio_review_events(video_id, revision DESC);
+
+  -- 快照、产物和审核事件是审计事实，只允许随所属视频级联删除。
+  CREATE TRIGGER video_tts_snapshots_immutable BEFORE UPDATE ON video_tts_snapshots
+  WHEN OLD.id IS NOT NEW.id OR OLD.project_id IS NOT NEW.project_id OR OLD.video_id IS NOT NEW.video_id
+    OR OLD.plan_snapshot_id IS NOT NEW.plan_snapshot_id OR OLD.plan_snapshot_hash IS NOT NEW.plan_snapshot_hash
+    OR OLD.script_revision_id IS NOT NEW.script_revision_id OR OLD.script_content_hash IS NOT NEW.script_content_hash
+    OR OLD.paragraphs_json IS NOT NEW.paragraphs_json OR OLD.provider_id IS NOT NEW.provider_id
+    OR OLD.provider_name IS NOT NEW.provider_name OR OLD.provider_kind IS NOT NEW.provider_kind
+    OR OLD.protocol IS NOT NEW.protocol OR OLD.base_url IS NOT NEW.base_url OR OLD.model_id IS NOT NEW.model_id
+    OR OLD.voice_id IS NOT NEW.voice_id OR OLD.rate IS NOT NEW.rate OR OLD.language IS NOT NEW.language
+    OR OLD.params_json IS NOT NEW.params_json OR OLD.target_duration_seconds IS NOT NEW.target_duration_seconds
+    OR OLD.system_contract_version IS NOT NEW.system_contract_version OR OLD.canonical_json IS NOT NEW.canonical_json
+    OR OLD.snapshot_hash IS NOT NEW.snapshot_hash OR OLD.created_at IS NOT NEW.created_at OR OLD.invalidated_at IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, 'video tts snapshot is immutable'); END;
+  CREATE TRIGGER video_tts_snapshots_no_delete BEFORE DELETE ON video_tts_snapshots
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video tts snapshot is immutable'); END;
+  CREATE TRIGGER video_tts_artifacts_immutable BEFORE UPDATE ON video_tts_artifacts
+  BEGIN SELECT RAISE(ABORT, 'video tts artifacts are immutable'); END;
+  CREATE TRIGGER video_tts_artifacts_no_delete BEFORE DELETE ON video_tts_artifacts
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video tts artifacts are immutable'); END;
+  CREATE TRIGGER video_tts_cues_immutable BEFORE UPDATE ON video_tts_cues
+  BEGIN SELECT RAISE(ABORT, 'video tts cues are immutable'); END;
+  CREATE TRIGGER video_tts_cues_no_delete BEFORE DELETE ON video_tts_cues
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video tts cues are immutable'); END;
+  CREATE TRIGGER video_audio_reviews_immutable BEFORE UPDATE ON video_audio_review_events
+  BEGIN SELECT RAISE(ABORT, 'video audio review events are append-only'); END;
+  CREATE TRIGGER video_audio_reviews_no_delete BEFORE DELETE ON video_audio_review_events
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video audio review events are append-only'); END;
+`;
+
+const MIGRATION_25 = `
+  CREATE TABLE videos_v25 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+    status TEXT NOT NULL CHECK (status IN (
+      'draft', 'preparing_sources', 'generating_script', 'planning_visuals',
+      'awaiting_review', 'producing_media', 'awaiting_media_review', 'rendering',
+      'completed', 'failed', 'cancelled'
+    )),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    input_mode TEXT NOT NULL DEFAULT 'topic' CHECK (input_mode IN ('topic', 'body')),
+    topic TEXT NOT NULL DEFAULT '' CHECK (length(topic) <= 200),
+    body TEXT NOT NULL DEFAULT '' CHECK (length(CAST(body AS BLOB)) <= 131072),
+    reference_text TEXT NOT NULL DEFAULT '' CHECK (length(CAST(reference_text AS BLOB)) <= 65536),
+    reference_role TEXT NOT NULL DEFAULT 'style_only' CHECK (reference_role IN ('style_only', 'content_source')),
+    target_duration_seconds INTEGER NOT NULL DEFAULT 180 CHECK (target_duration_seconds BETWEEN 60 AND 600),
+    visual_density TEXT NOT NULL DEFAULT 'standard' CHECK (visual_density IN ('relaxed', 'standard', 'compact')),
+    web_enabled INTEGER NOT NULL DEFAULT 1 CHECK (web_enabled IN (0, 1)),
+    script_instructions TEXT NOT NULL DEFAULT '' CHECK (length(script_instructions) <= 20000),
+    visual_instructions TEXT NOT NULL DEFAULT '' CHECK (length(visual_instructions) <= 20000),
+    UNIQUE (id, project_id)
+  ) STRICT;
+  INSERT INTO videos_v25 SELECT * FROM videos;
+  DROP TABLE videos;
+  ALTER TABLE videos_v25 RENAME TO videos;
+  CREATE INDEX videos_project_order ON videos(project_id, updated_at DESC, id);
+
+  CREATE TABLE video_visual_timelines (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    identity_hash TEXT NOT NULL CHECK (length(identity_hash) = 64 AND identity_hash NOT GLOB '*[^0-9a-f]*'),
+    plan_snapshot_id TEXT NOT NULL,
+    plan_snapshot_hash TEXT NOT NULL CHECK (length(plan_snapshot_hash) = 64 AND plan_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    script_revision_id TEXT NOT NULL,
+    script_content_hash TEXT NOT NULL CHECK (length(script_content_hash) = 64 AND script_content_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_revision_id TEXT NOT NULL,
+    visual_content_hash TEXT NOT NULL CHECK (length(visual_content_hash) = 64 AND visual_content_hash NOT GLOB '*[^0-9a-f]*'),
+    image_gate_revision INTEGER NOT NULL CHECK (image_gate_revision >= 1),
+    tts_snapshot_id TEXT NOT NULL,
+    tts_snapshot_hash TEXT NOT NULL CHECK (length(tts_snapshot_hash) = 64 AND tts_snapshot_hash NOT GLOB '*[^0-9a-f]*'),
+    tts_artifact_id TEXT NOT NULL,
+    audio_hash TEXT NOT NULL CHECK (length(audio_hash) = 64 AND audio_hash NOT GLOB '*[^0-9a-f]*'),
+    cues_hash TEXT NOT NULL CHECK (length(cues_hash) = 64 AND cues_hash NOT GLOB '*[^0-9a-f]*'),
+    srt_hash TEXT NOT NULL CHECK (length(srt_hash) = 64 AND srt_hash NOT GLOB '*[^0-9a-f]*'),
+    ass_hash TEXT NOT NULL CHECK (length(ass_hash) = 64 AND ass_hash NOT GLOB '*[^0-9a-f]*'),
+    audio_duration_ms INTEGER NOT NULL CHECK (audio_duration_ms > 0),
+    timeline_hash TEXT NOT NULL CHECK (length(timeline_hash) = 64 AND timeline_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    UNIQUE (video_id, identity_hash),
+    UNIQUE (id, video_id),
+    UNIQUE (id, video_id, timeline_hash),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (plan_snapshot_id, video_id, plan_snapshot_hash)
+      REFERENCES video_plan_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (script_revision_id, video_id, plan_snapshot_id, script_content_hash)
+      REFERENCES video_script_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (visual_revision_id, video_id, plan_snapshot_id, visual_content_hash)
+      REFERENCES video_visual_revisions(id, video_id, snapshot_id, content_hash) ON DELETE CASCADE,
+    FOREIGN KEY (tts_snapshot_id, video_id, tts_snapshot_hash)
+      REFERENCES video_tts_snapshots(id, video_id, snapshot_hash) ON DELETE CASCADE,
+    FOREIGN KEY (tts_artifact_id, video_id, tts_snapshot_id, audio_hash, cues_hash, srt_hash, ass_hash)
+      REFERENCES video_tts_artifacts(id, video_id, snapshot_id, audio_hash, cues_hash, srt_hash, ass_hash)
+  ) STRICT;
+
+  CREATE TABLE video_visual_segments (
+    id TEXT PRIMARY KEY,
+    stable_segment_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    timeline_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    segment_index INTEGER NOT NULL CHECK (segment_index >= 0),
+    cue_start_index INTEGER NOT NULL CHECK (cue_start_index >= 0),
+    cue_end_index INTEGER NOT NULL CHECK (cue_end_index >= cue_start_index),
+    cue_start_hash TEXT NOT NULL CHECK (length(cue_start_hash) = 64 AND cue_start_hash NOT GLOB '*[^0-9a-f]*'),
+    cue_end_hash TEXT NOT NULL CHECK (length(cue_end_hash) = 64 AND cue_end_hash NOT GLOB '*[^0-9a-f]*'),
+    start_ms INTEGER NOT NULL CHECK (start_ms >= 0),
+    end_ms INTEGER NOT NULL CHECK (end_ms > start_ms),
+    visual_id TEXT NOT NULL CHECK (length(visual_id) > 0),
+    candidate_id TEXT NOT NULL,
+    candidate_hash TEXT NOT NULL CHECK (length(candidate_hash) = 64 AND candidate_hash NOT GLOB '*[^0-9a-f]*'),
+    candidate_relative_path TEXT NOT NULL CHECK (length(candidate_relative_path) > 0),
+    motion_kind TEXT NOT NULL CHECK (motion_kind IN ('still','zoom_in','zoom_out','pan_left','pan_right')),
+    motion_amount_ppm INTEGER NOT NULL CHECK (motion_amount_ppm BETWEEN 0 AND 500000),
+    fade_in_ms INTEGER NOT NULL CHECK (fade_in_ms BETWEEN 0 AND 5000),
+    fade_out_ms INTEGER NOT NULL CHECK (fade_out_ms BETWEEN 0 AND 5000),
+    segment_hash TEXT NOT NULL CHECK (length(segment_hash) = 64 AND segment_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (timeline_id, segment_index),
+    UNIQUE (timeline_id, stable_segment_id),
+    UNIQUE (timeline_id, segment_hash),
+    UNIQUE (id, video_id, timeline_id, segment_hash),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (timeline_id, video_id) REFERENCES video_visual_timelines(id, video_id) ON DELETE CASCADE,
+    FOREIGN KEY (candidate_id, project_id, video_id, visual_id, candidate_hash)
+      REFERENCES video_image_candidates(id, project_id, video_id, visual_id, file_hash)
+  ) STRICT;
+
+  CREATE TABLE video_visual_review_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    timeline_id TEXT NOT NULL,
+    timeline_revision INTEGER NOT NULL CHECK (timeline_revision >= 1),
+    timeline_hash TEXT NOT NULL CHECK (length(timeline_hash) = 64 AND timeline_hash NOT GLOB '*[^0-9a-f]*'),
+    identity_hash TEXT NOT NULL CHECK (length(identity_hash) = 64 AND identity_hash NOT GLOB '*[^0-9a-f]*'),
+    action TEXT NOT NULL CHECK (action IN ('approve','needs_changes')),
+    notes TEXT NOT NULL CHECK (length(notes) <= 10000),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (video_id, revision),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (timeline_id, video_id, timeline_hash)
+      REFERENCES video_visual_timelines(id, video_id, timeline_hash) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE video_render_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    timeline_id TEXT NOT NULL,
+    timeline_hash TEXT NOT NULL CHECK (length(timeline_hash) = 64 AND timeline_hash NOT GLOB '*[^0-9a-f]*'),
+    visual_review_id TEXT NOT NULL REFERENCES video_visual_review_events(id) ON DELETE RESTRICT,
+    identity_hash TEXT NOT NULL CHECK (length(identity_hash) = 64 AND identity_hash NOT GLOB '*[^0-9a-f]*'),
+    job_id TEXT REFERENCES jobs(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+    params_json TEXT NOT NULL CHECK (json_valid(params_json)),
+    params_hash TEXT NOT NULL CHECK (length(params_hash) = 64 AND params_hash NOT GLOB '*[^0-9a-f]*'),
+    error_summary TEXT,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    UNIQUE (video_id, identity_hash),
+    UNIQUE (id, video_id),
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (timeline_id, video_id, timeline_hash)
+      REFERENCES video_visual_timelines(id, video_id, timeline_hash) ON DELETE RESTRICT
+  ) STRICT;
+
+  CREATE TABLE video_render_chunks (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    timeline_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+    segment_id TEXT NOT NULL,
+    segment_hash TEXT NOT NULL CHECK (length(segment_hash) = 64 AND segment_hash NOT GLOB '*[^0-9a-f]*'),
+    identity_hash TEXT NOT NULL CHECK (length(identity_hash) = 64 AND identity_hash NOT GLOB '*[^0-9a-f]*'),
+    status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+    relative_path TEXT,
+    bytes INTEGER CHECK (bytes IS NULL OR bytes > 0),
+    file_hash TEXT CHECK (file_hash IS NULL OR (length(file_hash) = 64 AND file_hash NOT GLOB '*[^0-9a-f]*')),
+    media_info_json TEXT CHECK (media_info_json IS NULL OR json_valid(media_info_json)),
+    error_summary TEXT,
+    checkpoint_at INTEGER CHECK (checkpoint_at IS NULL OR checkpoint_at >= 0),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+    UNIQUE (run_id, chunk_index),
+    UNIQUE (run_id, identity_hash),
+    FOREIGN KEY (run_id, video_id) REFERENCES video_render_runs(id, video_id) ON DELETE CASCADE,
+    FOREIGN KEY (segment_id, video_id, timeline_id, segment_hash)
+      REFERENCES video_visual_segments(id, video_id, timeline_id, segment_hash)
+  ) STRICT;
+
+  CREATE TABLE video_final_videos (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    identity_hash TEXT NOT NULL CHECK (length(identity_hash) = 64 AND identity_hash NOT GLOB '*[^0-9a-f]*'),
+    relative_path TEXT NOT NULL CHECK (length(relative_path) > 0),
+    bytes INTEGER NOT NULL CHECK (bytes > 0),
+    file_hash TEXT NOT NULL CHECK (length(file_hash) = 64 AND file_hash NOT GLOB '*[^0-9a-f]*'),
+    media_info_json TEXT NOT NULL CHECK (json_valid(media_info_json)),
+    manifest_relative_path TEXT NOT NULL CHECK (length(manifest_relative_path) > 0),
+    manifest_bytes INTEGER NOT NULL CHECK (manifest_bytes > 0),
+    manifest_hash TEXT NOT NULL CHECK (length(manifest_hash) = 64 AND manifest_hash NOT GLOB '*[^0-9a-f]*'),
+    ffmpeg_version TEXT NOT NULL,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    UNIQUE (run_id),
+    UNIQUE (video_id, identity_hash),
+    FOREIGN KEY (run_id, video_id) REFERENCES video_render_runs(id, video_id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id, project_id) REFERENCES videos(id, project_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE INDEX video_visual_timelines_current ON video_visual_timelines(video_id, revision DESC);
+  CREATE INDEX video_visual_segments_order ON video_visual_segments(timeline_id, segment_index);
+  CREATE INDEX video_visual_reviews_current ON video_visual_review_events(video_id, revision DESC);
+  CREATE INDEX video_render_runs_current ON video_render_runs(video_id, created_at DESC);
+  CREATE INDEX video_render_chunks_status ON video_render_chunks(run_id, status, chunk_index);
+
+  CREATE TRIGGER video_visual_timelines_immutable BEFORE UPDATE ON video_visual_timelines
+  BEGIN SELECT RAISE(ABORT, 'video visual timelines are immutable'); END;
+  CREATE TRIGGER video_visual_timelines_no_delete BEFORE DELETE ON video_visual_timelines
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video visual timelines are immutable'); END;
+  CREATE TRIGGER video_visual_segments_immutable BEFORE UPDATE ON video_visual_segments
+  BEGIN SELECT RAISE(ABORT, 'video visual segments are immutable'); END;
+  CREATE TRIGGER video_visual_segments_no_delete BEFORE DELETE ON video_visual_segments
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video visual segments are immutable'); END;
+  CREATE TRIGGER video_visual_reviews_immutable BEFORE UPDATE ON video_visual_review_events
+  BEGIN SELECT RAISE(ABORT, 'video visual review events are append-only'); END;
+  CREATE TRIGGER video_visual_reviews_no_delete BEFORE DELETE ON video_visual_review_events
+  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'video visual review events are append-only'); END;
+`;
+
 const MIGRATIONS = [
   MIGRATION_1, MIGRATION_2, MIGRATION_3, MIGRATION_4, MIGRATION_5, MIGRATION_6, MIGRATION_7, MIGRATION_8,
   MIGRATION_9,
@@ -781,6 +1558,11 @@ const MIGRATIONS = [
   MIGRATION_18,
   MIGRATION_19,
   MIGRATION_20,
+  MIGRATION_21,
+  MIGRATION_22,
+  MIGRATION_23,
+  MIGRATION_24,
+  MIGRATION_25,
 ];
 
 export interface YingshuDatabase {
@@ -816,12 +1598,19 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
     }
 
     for (let index = applied.length; index < MIGRATIONS.length; index += 1) {
-      const rebuildsEpisodes = index === 12;
-      if (rebuildsEpisodes) database.exec("PRAGMA foreign_keys = OFF");
+      const rebuildsReferencedTable = index === 12 || index === 22 || index === 24;
+      const videoDeleteTriggers = index === 24 ? database.prepare(
+        "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql LIKE '%FROM videos%' ORDER BY name",
+      ).all() as Array<{ name: string; sql: string }> : [];
+      if (rebuildsReferencedTable) database.exec("PRAGMA foreign_keys = OFF");
       database.exec("BEGIN IMMEDIATE");
       try {
+        for (const trigger of videoDeleteTriggers) {
+          database.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
+        }
         database.exec(MIGRATIONS[index]!);
-        if (rebuildsEpisodes && database.prepare("PRAGMA foreign_key_check").all().length) {
+        for (const trigger of videoDeleteTriggers) database.exec(trigger.sql);
+        if (rebuildsReferencedTable && database.prepare("PRAGMA foreign_key_check").all().length) {
           throw new Error("数据库迁移后外键校验失败");
         }
         database.prepare("INSERT INTO schema_migrations (version) VALUES (?)").run(index + 1);
@@ -834,7 +1623,7 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
         }
         throw error;
       } finally {
-        if (rebuildsEpisodes) database.exec("PRAGMA foreign_keys = ON");
+        if (rebuildsReferencedTable) database.exec("PRAGMA foreign_keys = ON");
       }
     }
 

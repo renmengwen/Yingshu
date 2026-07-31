@@ -35,6 +35,9 @@ export async function runVideoProcess(
     if (stderrBytes > MAX_PROCESS_OUTPUT) { overflow = true; child.kill(); return; }
     stderr.push(chunk);
   });
+  // Windows 在取消恰逢 pipe 建立/关闭时可能由 stdio Socket 抛 ENOTCONN；必须收敛到本次子进程结果，不能成为进程级未处理错误。
+  child.stdout.on("error", (error) => { childError ??= error; });
+  child.stderr.on("error", (error) => { childError ??= error; });
   child.once("error", (error) => { childError = error; });
   const poll = setInterval(() => { if (options.signal?.aborted) child.kill(); }, 50);
   const code = await new Promise<number | null>((resolve) => child.once("close", resolve));

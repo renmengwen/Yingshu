@@ -34,7 +34,10 @@ test("OpenAI 图片兼容请求支持 base64、固定合同和绑定 IP 的 URL 
       assert.equal(init?.redirect, "error");
       assert.equal(new Headers(init?.headers).get("authorization"), "Bearer secret-key");
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return Response.json({ data: [{ b64_json: Buffer.from("image").toString("base64"), revised_prompt: "revised" }] });
+      return Response.json(
+        { id: "provider-request-1", data: [{ b64_json: Buffer.from("image").toString("base64"), revised_prompt: "revised" }] },
+        { headers: { "x-request-id": "header-fallback" } },
+      );
     }) as typeof fetch,
   });
   assert.deepEqual(requestBody, {
@@ -43,6 +46,7 @@ test("OpenAI 图片兼容请求支持 base64、固定合同和绑定 IP 的 URL 
   });
   assert.equal(Buffer.from(base64.bytes).toString(), "image");
   assert.equal(base64.revisedPrompt, "revised");
+  assert.equal(base64.providerRequestId, "provider-request-1");
 
   const calls: Array<{ url: string; address: string }> = [];
   const requestImpl: BoundHttpRequest = async (url, address) => {

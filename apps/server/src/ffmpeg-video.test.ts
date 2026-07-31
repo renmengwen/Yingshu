@@ -22,6 +22,12 @@ test("视频进程封装限制输出并传播失败与取消", async () => {
   const running = runVideoProcess(process.execPath, ["-e", "setInterval(()=>{},1000)"], { signal: controller.signal });
   setTimeout(() => controller.abort(), 30);
   await assert.rejects(running, JobCancelledError);
+
+  const pipeController = new AbortController();
+  const pipeRace = runVideoProcess(process.execPath, ["-e", "setInterval(()=>process.stdout.write('x'),0)"],
+    { signal: pipeController.signal });
+  setTimeout(() => pipeController.abort(), 0);
+  await assert.rejects(pipeRace, JobCancelledError);
 });
 
 test("9:16 视频探测拒绝非 AAC 音轨和非 yuv420p 像素格式", async () => {

@@ -17,6 +17,7 @@ export interface OpenAiImageConfig {
 export interface GeneratedImage {
   bytes: Uint8Array;
   revisedPrompt?: string;
+  providerRequestId?: string;
 }
 
 export interface BoundHttpResponse {
@@ -233,7 +234,8 @@ export async function generateOpenAiImage(input: GenerateImageInput): Promise<Ge
     if (error instanceof Error && error.message.includes("超过大小限制")) throw error;
     throw new Error("图片模型返回了无效 JSON");
   }
-  const item = (body as { data?: Array<{ url?: unknown; b64_json?: unknown; revised_prompt?: unknown }> })?.data?.[0];
+  const result = body as { id?: unknown; request_id?: unknown; data?: Array<{ url?: unknown; b64_json?: unknown; revised_prompt?: unknown }> };
+  const item = result?.data?.[0];
   if (!item) throw new Error("图片模型没有返回图片");
   let bytes: Uint8Array;
   if (typeof item.b64_json === "string") bytes = decodeBase64(item.b64_json);
@@ -246,5 +248,11 @@ export async function generateOpenAiImage(input: GenerateImageInput): Promise<Ge
       throw new Error("图片下载失败");
     }
   } else throw new Error("图片模型返回格式不受支持");
-  return { bytes, ...(typeof item.revised_prompt === "string" ? { revisedPrompt: item.revised_prompt } : {}) };
+  const requestId = [result.id, result.request_id, response.headers.get("x-request-id"), response.headers.get("request-id")]
+    .find((value) => typeof value === "string" && value.trim().length > 0 && value.trim().length <= 255);
+  return {
+    bytes,
+    ...(typeof item.revised_prompt === "string" ? { revisedPrompt: item.revised_prompt } : {}),
+    ...(typeof requestId === "string" ? { providerRequestId: requestId.trim() } : {}),
+  };
 }

@@ -7,8 +7,36 @@ import test from "node:test";
 
 import { openDatabase } from "./database.js";
 
-function downgradeCurrentDatabaseFromV18(database: DatabaseSync) {
+function dropVideoPlanTables(database: DatabaseSync) {
   database.exec(`
+    DROP TABLE video_final_videos;
+    DROP TABLE video_render_chunks;
+    DROP TABLE video_render_runs;
+    DROP TABLE video_visual_review_events;
+    DROP TABLE video_visual_segments;
+    DROP TABLE video_visual_timelines;
+    DROP TABLE video_audio_review_events;
+    DROP TABLE video_tts_cues;
+    DROP TABLE video_tts_artifacts;
+    DROP TABLE video_tts_jobs;
+    DROP TABLE video_tts_snapshots;
+    DROP TABLE video_image_approval_events;
+    DROP TABLE video_image_candidates;
+    DROP TABLE video_image_batch_items;
+    DROP TABLE video_image_batches;
+    DROP TABLE video_plan_approvals;
+    DROP TABLE video_visual_revisions;
+    DROP TABLE video_script_revisions;
+    DROP TABLE video_plan_sources;
+    DROP TABLE video_plan_jobs;
+    DROP TABLE video_plan_snapshots;
+  `);
+}
+
+function downgradeCurrentDatabaseFromV18(database: DatabaseSync) {
+  dropVideoPlanTables(database);
+  database.exec(`
+    DROP TABLE global_prompt_settings;
     DROP TABLE videos;
     DROP TABLE projects;
     DROP TABLE book_prompt_profiles;
@@ -105,12 +133,212 @@ test("数据库迁移可重复执行并在重启后保留书库数据", async ()
 
     assert.equal(book?.id, "book_sha256");
     assert.equal(book?.title, "测试书");
-    assert.equal(migration?.version, 20);
+    assert.equal(migration?.version, 25);
     assert.equal(chapterCount?.count, 0);
     assert.equal(eventCount?.count, 0);
     assert.equal(sourceCount?.count, 0);
     assert.equal((await readFile(join(dataRoot, "yingshu.sqlite3"))).length > 0, true);
   } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("v20 项目视频原地升级 v21 后获得输入草稿默认值和全局设置", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v20-input-"));
+  try {
+    const current = openDatabase(dataRoot);
+    current.database.prepare(
+      "INSERT INTO projects (id, name, created_at, updated_at) VALUES ('project', '项目', 1, 1)",
+    ).run();
+    current.database.prepare(
+      `INSERT INTO videos (id, project_id, title, status, created_at, updated_at)
+       VALUES ('video', 'project', '视频', 'draft', 2, 2)`,
+    ).run();
+    dropVideoPlanTables(current.database);
+    current.database.exec(`
+      DROP TABLE global_prompt_settings;
+      ALTER TABLE videos DROP COLUMN visual_instructions;
+      ALTER TABLE videos DROP COLUMN script_instructions;
+      ALTER TABLE videos DROP COLUMN web_enabled;
+      ALTER TABLE videos DROP COLUMN visual_density;
+      ALTER TABLE videos DROP COLUMN target_duration_seconds;
+      ALTER TABLE videos DROP COLUMN reference_role;
+      ALTER TABLE videos DROP COLUMN reference_text;
+      ALTER TABLE videos DROP COLUMN body;
+      ALTER TABLE videos DROP COLUMN topic;
+      ALTER TABLE videos DROP COLUMN input_mode;
+      ALTER TABLE projects DROP COLUMN visual_instructions;
+      ALTER TABLE projects DROP COLUMN script_instructions;
+      DELETE FROM schema_migrations WHERE version >= 21;
+    `);
+    current.close();
+
+    const upgraded = openDatabase(dataRoot);
+    try {
+      const video = upgraded.database.prepare(
+        `SELECT input_mode, topic, body, reference_role, target_duration_seconds, visual_density, web_enabled
+         FROM videos WHERE id = 'video'`,
+      ).get();
+      assert.deepEqual({ ...video }, {
+        input_mode: "topic", topic: "", body: "", reference_role: "style_only",
+        target_duration_seconds: 180, visual_density: "standard", web_enabled: 1,
+      });
+      assert.deepEqual({ ...upgraded.database.prepare(
+        "SELECT script_instructions, visual_instructions, updated_at FROM global_prompt_settings WHERE id = 1",
+      ).get() }, { script_instructions: "", visual_instructions: "", updated_at: 0 });
+      assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
+        .get()?.version, 25);
+    } finally {
+      upgraded.close();
+    }
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("v21 视频原地升级 v22 后保留全部输入列并获得严格计划状态", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v21-plan-"));
+  try {
+    const current = openDatabase(dataRoot);
+    current.database.prepare(
+      "INSERT INTO projects (id, name, created_at, updated_at) VALUES ('project', '项目', 1, 1)",
+    ).run();
+    current.database.prepare(`INSERT INTO videos (
+      id, project_id, title, status, created_at, updated_at, input_mode, topic, body,
+      reference_text, reference_role, target_duration_seconds, visual_density, web_enabled,
+      script_instructions, visual_instructions
+    ) VALUES ('video', 'project', '视频', 'draft', 2, 3, 'body', '主题', '正文',
+      '参考', 'content_source', 600, 'compact', 0, '旁白要求', '画面要求')`).run();
+    dropVideoPlanTables(current.database);
+    current.database.exec(`
+      ALTER TABLE videos RENAME TO videos_v22_current;
+      CREATE TABLE videos (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+        status TEXT NOT NULL CHECK (status = 'draft'),
+        created_at INTEGER NOT NULL CHECK (created_at >= 0),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= created_at),
+        input_mode TEXT NOT NULL DEFAULT 'topic' CHECK (input_mode IN ('topic', 'body')),
+        topic TEXT NOT NULL DEFAULT '' CHECK (length(topic) <= 200),
+        body TEXT NOT NULL DEFAULT '' CHECK (length(CAST(body AS BLOB)) <= 131072),
+        reference_text TEXT NOT NULL DEFAULT '' CHECK (length(CAST(reference_text AS BLOB)) <= 65536),
+        reference_role TEXT NOT NULL DEFAULT 'style_only' CHECK (reference_role IN ('style_only', 'content_source')),
+        target_duration_seconds INTEGER NOT NULL DEFAULT 180 CHECK (target_duration_seconds BETWEEN 60 AND 600),
+        visual_density TEXT NOT NULL DEFAULT 'standard' CHECK (visual_density IN ('relaxed', 'standard', 'compact')),
+        web_enabled INTEGER NOT NULL DEFAULT 1 CHECK (web_enabled IN (0, 1)),
+        script_instructions TEXT NOT NULL DEFAULT '' CHECK (length(script_instructions) <= 20000),
+        visual_instructions TEXT NOT NULL DEFAULT '' CHECK (length(visual_instructions) <= 20000)
+      ) STRICT;
+      INSERT INTO videos SELECT * FROM videos_v22_current;
+      DROP TABLE videos_v22_current;
+      CREATE INDEX videos_project_order ON videos(project_id, updated_at DESC, id);
+      DELETE FROM schema_migrations WHERE version >= 22;
+    `);
+    current.close();
+
+    const upgraded = openDatabase(dataRoot);
+    try {
+      assert.deepEqual({ ...upgraded.database.prepare(
+        `SELECT input_mode, topic, body, reference_text, reference_role, target_duration_seconds,
+                visual_density, web_enabled, script_instructions, visual_instructions
+         FROM videos WHERE id = 'video'`,
+      ).get() }, {
+        input_mode: "body", topic: "主题", body: "正文", reference_text: "参考",
+        reference_role: "content_source", target_duration_seconds: 600, visual_density: "compact",
+        web_enabled: 0, script_instructions: "旁白要求", visual_instructions: "画面要求",
+      });
+      upgraded.database.prepare("UPDATE videos SET status = 'awaiting_review' WHERE id = 'video'").run();
+      upgraded.database.prepare("UPDATE videos SET status = 'rendering' WHERE id = 'video'").run();
+      upgraded.database.prepare("UPDATE videos SET status = 'completed' WHERE id = 'video'").run();
+      assert.throws(() => upgraded.database.prepare("UPDATE videos SET status = 'published' WHERE id = 'video'").run(),
+        /CHECK constraint failed/);
+      assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
+    } finally { upgraded.close(); }
+  } finally { await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test("v22 计划表约束冻结身份、追加 revision 并随视频完整级联", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v22-contract-"));
+  const connection = openDatabase(dataRoot);
+  const database = connection.database;
+  const hash = "a".repeat(64);
+  try {
+    database.exec(`
+      INSERT INTO projects (id, name, created_at, updated_at) VALUES ('project', '项目', 1, 1);
+      INSERT INTO projects (id, name, created_at, updated_at) VALUES ('other', '其他项目', 1, 1);
+      INSERT INTO videos (id, project_id, title, status, created_at, updated_at)
+        VALUES ('video', 'project', '视频', 'draft', 1, 1);
+      INSERT INTO videos (id, project_id, title, status, created_at, updated_at)
+        VALUES ('other_video', 'other', '其他视频', 'draft', 1, 1);
+    `);
+    database.prepare(`INSERT INTO video_plan_snapshots (
+      id, video_id, idempotency_key, input_json, prompt_json, model_json, system_contract_version,
+      web_capability, canonical_json, snapshot_hash, created_at
+    ) VALUES ('snapshot', 'video', 'request-1', '{}', '{}', '{}', 'v1', 'disabled', '{}', ?, 2)`).run(hash);
+    database.prepare(
+      "INSERT INTO jobs (id, type, payload_json, status, run_after, created_at, updated_at) VALUES ('job', 'video_plan', '{}', 'queued', 2, 2, 2)",
+    ).run();
+    database.prepare(
+      "INSERT INTO video_plan_jobs (job_id, video_id, snapshot_id, created_at) VALUES ('job', 'video', 'snapshot', 2)",
+    ).run();
+    database.prepare(`INSERT INTO video_plan_sources (
+      id, video_id, snapshot_id, source_index, query, provider, tool, retrieved_at, url, title,
+      usage_summary, audit_excerpt, content_hash, status, created_at
+    ) VALUES ('source', 'video', 'snapshot', 0, '查询', 'provider', 'search', 3,
+      'https://example.com', '来源', '摘要', '审计', ?, 'succeeded', 3)`).run(hash);
+    database.prepare(`INSERT INTO video_script_revisions (
+      id, video_id, snapshot_id, revision, content_json, content_hash, provider_id, model_id,
+      prompt_version, prompt_hash, created_at
+    ) VALUES ('script', 'video', 'snapshot', 1, '{}', ?, 'provider', 'model', 'v1', ?, 4)`).run(hash, hash);
+    database.prepare(`INSERT INTO video_visual_revisions (
+      id, video_id, snapshot_id, script_revision_id, script_content_hash, revision,
+      content_json, content_hash, created_at
+    ) VALUES ('visual', 'video', 'snapshot', 'script', ?, 1, '{}', ?, 5)`).run(hash, hash);
+    database.prepare(`INSERT INTO video_plan_approvals (
+      id, video_id, snapshot_id, revision, script_revision_id, visual_revision_id,
+      script_content_hash, visual_content_hash, created_at
+    ) VALUES ('approval', 'video', 'snapshot', 1, 'script', 'visual', ?, ?, 6)`).run(hash, hash);
+
+    assert.throws(
+      () => database.prepare("UPDATE video_plan_snapshots SET input_json = '{\"changed\":true}' WHERE id = 'snapshot'").run(),
+      /video plan snapshot is immutable/,
+    );
+    database.prepare("UPDATE video_plan_snapshots SET invalidated_at = 7 WHERE id = 'snapshot'").run();
+    assert.throws(
+      () => database.prepare("UPDATE video_plan_snapshots SET invalidated_at = 8 WHERE id = 'snapshot'").run(),
+      /video plan snapshot is immutable/,
+    );
+    assert.throws(() => database.prepare("DELETE FROM video_plan_snapshots WHERE id = 'snapshot'").run(), /immutable/);
+    assert.throws(
+      () => database.prepare("UPDATE video_script_revisions SET content_json = '{}' WHERE id = 'script'").run(),
+      /append-only/,
+    );
+    assert.throws(() => database.prepare("DELETE FROM video_plan_approvals WHERE id = 'approval'").run(), /append-only/);
+    assert.throws(
+      () => database.prepare(`INSERT INTO video_plan_sources (
+        id, video_id, snapshot_id, source_index, query, provider, tool, retrieved_at, url, title,
+        usage_summary, audit_excerpt, content_hash, status, created_at
+      ) VALUES ('cross', 'other_video', 'snapshot', 1, '查询', 'provider', 'search', 3,
+        'https://example.com/2', '来源', '', '', ?, 'succeeded', 3)`).run(hash),
+      /FOREIGN KEY constraint failed/,
+    );
+    assert.throws(
+      () => database.prepare("UPDATE video_plan_sources SET content_hash = 'ABC' WHERE id = 'source'").run(),
+      /CHECK constraint failed/,
+    );
+
+    database.prepare("DELETE FROM projects WHERE id = 'project'").run();
+    for (const table of [
+      "videos", "video_plan_snapshots", "video_plan_jobs", "video_plan_sources",
+      "video_script_revisions", "video_visual_revisions", "video_plan_approvals",
+    ]) {
+      assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${table === "videos" ? "id" : "video_id"} = 'video'`).get()?.count, 0);
+    }
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM jobs WHERE id = 'job'").get()?.count, 1);
+    assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally {
+    connection.close();
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
@@ -131,6 +359,86 @@ test("初始化失败会关闭 SQLite 文件", async () => {
   }
 });
 
+test("v23 图片表冻结生成身份并以追加事件记录审核", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v23-images-"));
+  const connection = openDatabase(dataRoot);
+  const db = connection.database;
+  const hash = "a".repeat(64);
+  const fileHash = "b".repeat(64);
+  try {
+    db.exec(`
+      INSERT INTO projects (id, name, created_at, updated_at) VALUES ('project', '项目', 1, 1);
+      INSERT INTO projects (id, name, created_at, updated_at) VALUES ('other', '其他', 1, 1);
+      INSERT INTO videos (id, project_id, title, status, created_at, updated_at)
+        VALUES ('video', 'project', '视频', 'awaiting_review', 1, 1);
+    `);
+    db.prepare(`INSERT INTO video_plan_snapshots (
+      id, video_id, idempotency_key, input_json, prompt_json, model_json, system_contract_version,
+      web_capability, canonical_json, snapshot_hash, created_at
+    ) VALUES ('snapshot', 'video', 'plan-request', '{}', '{}', '{}', 'v1', 'disabled', '{}', ?, 2)`).run(hash);
+    db.prepare(`INSERT INTO video_script_revisions (
+      id, video_id, snapshot_id, revision, content_json, content_hash, provider_id, model_id,
+      prompt_version, prompt_hash, created_at
+    ) VALUES ('script', 'video', 'snapshot', 1, '{}', ?, 'provider', 'model', 'v1', ?, 3)`).run(hash, hash);
+    db.prepare(`INSERT INTO video_visual_revisions (
+      id, video_id, snapshot_id, script_revision_id, script_content_hash, revision,
+      content_json, content_hash, created_at
+    ) VALUES ('visual-revision', 'video', 'snapshot', 'script', ?, 1, '{}', ?, 4)`).run(hash, hash);
+    db.prepare(`INSERT INTO video_image_batches (
+      id, project_id, video_id, plan_snapshot_id, plan_snapshot_hash, script_revision_id,
+      script_content_hash, visual_revision_id, visual_content_hash, mode, idempotency_key,
+      provider_id, model_id, planned_count, created_at
+    ) VALUES ('batch', 'project', 'video', 'snapshot', ?, 'script', ?, 'visual-revision', ?,
+      'batch', 'image-request', 'provider', 'model', 1, 5)`).run(hash, hash, hash);
+    db.prepare("INSERT INTO jobs (id, type, payload_json, status, run_after, created_at, updated_at) VALUES ('image-job', 'video_image', '{}', 'queued', 5, 5, 5)").run();
+    db.prepare(`INSERT INTO video_image_batch_items (
+      batch_id, video_id, visual_id, job_id, request_identity, status, created_at, updated_at
+    ) VALUES ('batch', 'video', 'scene-1', 'image-job', 'scene-request-1', 'queued', 5, 5)`).run();
+    assert.throws(() => db.prepare(`INSERT INTO video_image_batch_items (
+      batch_id, video_id, visual_id, request_identity, status, created_at, updated_at
+    ) VALUES ('batch', 'video', 'scene-1', 'scene-request-2', 'queued', 5, 5)`).run(), /UNIQUE constraint failed/);
+    db.prepare(`INSERT INTO video_image_candidates (
+      id, project_id, video_id, plan_snapshot_id, plan_snapshot_hash, script_revision_id,
+      script_content_hash, visual_revision_id, visual_content_hash, visual_id, prompt,
+      negative_prompt, style_snapshot_json, prompt_hash, provider_id, model_id, params_json,
+      request_identity, job_id, attempt, checkpoint_scope, provider_request_id, status,
+      origin, relative_path, mime, bytes, width, height, file_hash, created_at
+    ) VALUES ('candidate', 'project', 'video', 'snapshot', ?, 'script', ?, 'visual-revision', ?,
+      'scene-1', '完整提示词', '', '{}', ?, 'provider', 'model', '{}', 'candidate-request',
+      'image-job', 1, 'scene-1', 'safe-id', 'succeeded', 'generated',
+      'videos/video/images/b.png', 'image/png', 68, 1, 1, ?, 6)`).run(hash, hash, hash, hash, fileHash);
+    assert.throws(() => db.prepare("UPDATE video_image_candidates SET prompt = 'changed' WHERE id = 'candidate'").run(), /immutable/);
+    assert.throws(() => db.prepare(`INSERT INTO video_image_candidates (
+      id, project_id, video_id, plan_snapshot_id, plan_snapshot_hash, script_revision_id,
+      script_content_hash, visual_revision_id, visual_content_hash, visual_id, prompt,
+      negative_prompt, style_snapshot_json, prompt_hash, provider_id, model_id, params_json,
+      request_identity, attempt, checkpoint_scope, status, error_category, error_summary,
+      origin, relative_path, mime, bytes, width, height, file_hash, created_at
+    ) VALUES ('bad-failure', 'project', 'video', 'snapshot', ?, 'script', ?, 'visual-revision', ?,
+      'scene-1', '提示词', '', '{}', ?, 'provider', 'model', '{}', 'failed-request', 1,
+      'scene-1', 'failed', 'temporary', '可重试', 'generated', 'unsafe.png', 'image/png',
+      1, 1, 1, ?, 7)`).run(hash, hash, hash, hash, fileHash), /CHECK constraint failed/);
+    db.prepare(`INSERT INTO video_image_approval_events (
+      id, project_id, video_id, gate_revision, visual_id, candidate_id, plan_snapshot_id,
+      plan_snapshot_hash, script_revision_id, script_content_hash, visual_revision_id,
+      visual_content_hash, prompt_hash, candidate_hash, created_at
+    ) VALUES ('approval-1', 'project', 'video', 1, 'scene-1', 'candidate', 'snapshot', ?,
+      'script', ?, 'visual-revision', ?, ?, ?, 8)`).run(hash, hash, hash, hash, fileHash);
+    assert.throws(() => db.prepare("UPDATE video_image_approval_events SET gate_revision = 2 WHERE id = 'approval-1'").run(), /append-only/);
+    db.prepare("UPDATE videos SET status = 'producing_media' WHERE id = 'video'").run();
+    db.prepare("UPDATE videos SET status = 'awaiting_media_review' WHERE id = 'video'").run();
+    assert.throws(() => db.prepare("UPDATE videos SET status = 'synthesizing_audio' WHERE id = 'video'").run(), /CHECK constraint failed/);
+    db.prepare("DELETE FROM projects WHERE id = 'project'").run();
+    for (const table of ["video_image_batches", "video_image_batch_items", "video_image_candidates", "video_image_approval_events"]) {
+      assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count, 0);
+    }
+    assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally {
+    connection.close();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("未来迁移版本或版本断层会失败关闭", async () => {
   for (const mode of ["future", "gap"] as const) {
     const dataRoot = await mkdtemp(join(tmpdir(), `narralume-database-${mode}-`));
@@ -138,7 +446,7 @@ test("未来迁移版本或版本断层会失败关闭", async () => {
     try {
       openDatabase(dataRoot).close();
       const malformed = new DatabaseSync(databasePath);
-      if (mode === "future") malformed.prepare("INSERT INTO schema_migrations (version) VALUES (21)").run();
+      if (mode === "future") malformed.prepare("INSERT INTO schema_migrations (version) VALUES (26)").run();
       else malformed.prepare("DELETE FROM schema_migrations WHERE version = 1").run();
       malformed.close();
 
@@ -148,6 +456,41 @@ test("未来迁移版本或版本断层会失败关闭", async () => {
       await rm(dataRoot, { recursive: true, force: true });
     }
   }
+});
+
+test("v25 建立 Video 视觉审核与最终渲染严格表，并扩展成片状态", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v25-visual-render-"));
+  const connection = openDatabase(dataRoot);
+  try {
+    const expected = [
+      "video_final_videos", "video_render_chunks", "video_render_runs", "video_visual_review_events",
+      "video_visual_segments", "video_visual_timelines",
+    ];
+    const tables = connection.database.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${expected.map(() => "?").join(",")}) ORDER BY name`,
+    ).all(...expected) as Array<{ name: string }>;
+    assert.deepEqual(tables.map((table) => table.name), expected);
+    const chunkSchema = connection.database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='video_render_chunks'",
+    ).get()?.sql as string;
+    assert.match(chunkSchema, /UNIQUE \(run_id, identity_hash\)/u);
+    assert.doesNotMatch(chunkSchema, /UNIQUE \(identity_hash\)/u);
+    const triggers = connection.database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'video_visual_%' ORDER BY name",
+    ).all() as Array<{ name: string }>;
+    assert.deepEqual(triggers.map((trigger) => trigger.name), [
+      "video_visual_reviews_immutable", "video_visual_reviews_no_delete", "video_visual_revisions_immutable",
+      "video_visual_revisions_no_delete", "video_visual_segments_immutable", "video_visual_segments_no_delete",
+      "video_visual_timelines_immutable", "video_visual_timelines_no_delete",
+    ]);
+    connection.database.prepare("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p25','项目',1,1)").run();
+    connection.database.prepare(
+      "INSERT INTO videos (id,project_id,title,status,created_at,updated_at) VALUES ('v25','p25','视频','rendering',1,1)",
+    ).run();
+    connection.database.prepare("UPDATE videos SET status='completed',updated_at=2 WHERE id='v25'").run();
+    assert.equal(connection.database.prepare("SELECT status FROM videos WHERE id='v25'").get()?.status, "completed");
+    assert.equal(connection.database.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally { connection.close(); await rm(dataRoot, { recursive: true, force: true }); }
 });
 
 test("既有 migration v2 数据库可原地升级 checkpoint、章节事件与分集表", async () => {
@@ -181,7 +524,7 @@ test("既有 migration v2 数据库可原地升级 checkpoint、章节事件与�
     const eventTable = upgraded.database
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chapter_events'")
       .get();
-    assert.equal(migration?.version, 20);
+    assert.equal(migration?.version, 25);
     assert.equal(checkpointTable?.name, "job_checkpoints");
     assert.equal(eventTable?.name, "chapter_events");
     upgraded.close();
@@ -222,7 +565,7 @@ test("既有 migration v5 数据库可升级批准事件且删除分集会完整
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     upgraded.database.prepare(
       `INSERT INTO script_versions (
@@ -286,7 +629,7 @@ test("既有 migration v7 数据库可升级音频段与字幕并约束不可变
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     const audioTables = upgraded.database
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'audio_%' ORDER BY name")
@@ -381,7 +724,7 @@ test("既有 migration v4 数据库可升级 v5 且删除书籍会级联分集�
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     upgraded.database.prepare(
       `INSERT INTO series_projects (id, book_id, title, created_at, updated_at)
@@ -439,7 +782,7 @@ test("既有 migration v8 数据库可升级资产合同并保持关系约束", 
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     const tables = upgraded.database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('assets', 'asset_aliases') ORDER BY name",
@@ -585,7 +928,7 @@ test("既有 migration v10 数据库可升级视觉段与显式资产关系", as
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     const tables = upgraded.database.prepare(
       `SELECT name FROM sqlite_master
@@ -635,7 +978,7 @@ test("既有 migration v11 数据库保留数据升级 render_chunks 并执行�
 
     const upgraded = openDatabase(dataRoot);
     const database = upgraded.database;
-    assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 20);
+    assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
     assert.equal(database.prepare("SELECT title FROM books WHERE id = 'book_v11'").get()?.title, "旧数据");
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='render_chunks'").get()?.name, "render_chunks");
     const insert = database.prepare(
@@ -766,7 +1109,7 @@ test("既有 migration v13 数据库升级流水线表并执行 active、约束�
 
     const upgraded = openDatabase(dataRoot);
     const db = upgraded.database;
-    assert.equal(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 20);
+    assert.equal(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
     const insert = db.prepare(`INSERT INTO series_pipeline_runs
       (id,series_project_id,status,episode_count,target_duration_seconds,source_start_chapter_id,
        source_end_chapter_id,config_hash,created_at,updated_at)

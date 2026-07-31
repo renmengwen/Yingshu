@@ -21,6 +21,14 @@ import { BookImportError, importBookText } from "./book-import.js";
 import { BookLibraryError, cleanupPendingBookDeletions, listBooks, listChapters, readChapterText } from "./book-library.js";
 import { registerBookRoutes } from "./book-routes.js";
 import { registerChapterRoutes } from "./chapter-routes.js";
+import { registerCreativeInputRoutes } from "./creative-input-routes.js";
+import { createVideoPlanGenerator } from "./video-plan-provider.js";
+import { registerVideoPlanRoutes } from "./video-plan-routes.js";
+import {
+  createVideoPlanJobHandler,
+  type GenerateVideoPlan,
+  VIDEO_PLAN_JOB_TYPE,
+} from "./video-plan-service.js";
 import { registerExportRoutes } from "./export-routes.js";
 import {
   ChapterEventError,
@@ -77,6 +85,7 @@ import { registerProjectVideoRoutes } from "./project-video-routes.js";
 import {
   readModelConfig,
   resolveRuntimeModelConfig,
+  type RuntimeModelConfig,
   type RuntimeModelIdentity,
 } from "./model-config.js";
 import {
@@ -123,6 +132,18 @@ import {
   IMAGE_CANDIDATE_JOB_TYPE,
 } from "./image-candidate-job.js";
 import type { OpenAiImageConfig } from "./image-provider.js";
+import { VIDEO_IMAGE_JOB_TYPE } from "./video-image-contract.js";
+import { createVideoImageJobHandler } from "./video-image-job.js";
+import { registerVideoImageRoutes } from "./video-image-routes.js";
+import { createVideoTtsJobHandler } from "./video-tts-job.js";
+import { resolveVideoTtsProviderIdentity, type SynthesizeVideoTts } from "./video-tts-provider.js";
+import { registerVideoTtsRoutes } from "./video-tts-routes.js";
+import { VIDEO_TTS_JOB_TYPE, VideoTtsStoreError, type VideoTtsSnapshot } from "./video-tts-store.js";
+import { registerVideoVisualTimelineRoutes } from "./video-visual-timeline-routes.js";
+import { registerVideoVisualReviewRoutes } from "./video-visual-review-routes.js";
+import { createVideoRenderJobHandler } from "./video-render-job.js";
+import { registerVideoRenderRoutes } from "./video-render-routes.js";
+import { VIDEO_RENDER_JOB_TYPE } from "./video-render-store.js";
 import {
   ASSET_PROMPT_DRAFT_JOB_TYPE,
   createAssetPromptDraftJobHandler,
@@ -173,6 +194,7 @@ const TEXT_JOB_TYPES = new Set([
   EPISODE_SCRIPT_GENERATION_JOB_TYPE,
   EPISODE_RECOMMENDATION_JOB_TYPE,
   ASSET_PROMPT_DRAFT_JOB_TYPE,
+  VIDEO_PLAN_JOB_TYPE,
 ]);
 
 interface BuildAppOptions {
@@ -189,6 +211,8 @@ interface BuildAppOptions {
   episodeRecommender?: RecommendEpisodeSources;
   episodeScriptGenerator?: GenerateEpisodeScript;
   assetPromptDraftGenerator?: GenerateAssetPromptDraft;
+  videoPlanGenerator?: GenerateVideoPlan;
+  videoTtsSynthesizer?: SynthesizeVideoTts;
 }
 
 interface CreateJobBody {
@@ -336,7 +360,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     const stored = await readModelConfig(dataRoot);
     const runtime = resolveRuntimeModelConfig("image", stored, identity);
-    if (runtime?.baseUrl) return {
+    if (runtime?.baseUrl && runtime.providerKind === "openai-compatible") return {
       baseUrl: runtime.baseUrl,
       apiKey: runtime.apiKey,
       model: runtime.modelId,
@@ -369,6 +393,33 @@ export function buildApp(options: BuildAppOptions = {}) {
     return fallback && (!identity || (fallback.providerId === identity.providerId && fallback.model === identity.modelId))
       ? fallback
       : null;
+  }
+  async function resolveVideoPlanProvider(providerId: string): Promise<ChapterTextModelConfig | null> {
+    if (options.chapterTextProvider !== undefined) {
+      return options.chapterTextProvider?.providerId === providerId ? options.chapterTextProvider : null;
+    }
+    const stored = await readModelConfig(dataRoot);
+    const provider = stored.providers[providerId];
+    if (provider?.apiKey) return {
+      providerId,
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+      protocol: provider.protocol,
+      model: provider.models.text.modelId || "frozen-video-plan-model",
+    };
+    const fallback = chapterTextProviderFromEnvironment();
+    return fallback?.providerId === providerId ? fallback : null;
+  }
+  async function resolveCurrentVideoTtsRuntime() {
+    return resolveRuntimeModelConfig("tts", await readModelConfig(dataRoot));
+  }
+  function frozenVideoTtsRuntime(snapshot: VideoTtsSnapshot): RuntimeModelConfig | null {
+    if (snapshot.providerKind !== "edge-tts") return null;
+    return {
+      enabled: true, type: "tts", providerId: snapshot.providerId, providerName: snapshot.providerName,
+      providerKind: snapshot.providerKind, protocol: snapshot.protocol, baseUrl: snapshot.baseUrl, apiKey: "",
+      modelId: snapshot.modelId, voiceId: snapshot.voiceId, language: snapshot.language, wordBoundary: true,
+    };
   }
   function frozenModelIdentity(payload: unknown): RuntimeModelIdentity | undefined {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
@@ -430,6 +481,13 @@ export function buildApp(options: BuildAppOptions = {}) {
         options.assetPromptDraftGenerator ?? createOpenAiAssetPromptDraftGenerator(provider),
       )(context);
     },
+    [VIDEO_PLAN_JOB_TYPE]: async (context: JobExecutionContext) => {
+      return createVideoPlanJobHandler(
+        connection.database,
+        resolveVideoPlanProvider,
+        options.videoPlanGenerator ?? { create: createVideoPlanGenerator },
+      )(context);
+    },
     [EPISODE_PLAN_JOB_TYPE]: async (context: JobExecutionContext) => {
       const provider = await resolveChapterTextProvider(frozenModelIdentity(context.job.payload));
       if (!provider) throw new Error("逐集局部规划任务对应的模型配置不可用");
@@ -451,6 +509,25 @@ export function buildApp(options: BuildAppOptions = {}) {
       if (!provider) throw new Error("图片生成任务对应的模型配置不可用");
       return createImageCandidateJobHandler(connection.database, dataRoot, provider)(context);
     },
+    [VIDEO_IMAGE_JOB_TYPE]: createVideoImageJobHandler(
+      connection.database,
+      dataRoot,
+      (identity) => resolveImageProvider(identity),
+    ),
+    [VIDEO_TTS_JOB_TYPE]: createVideoTtsJobHandler(
+      connection.database,
+      dataRoot,
+      async (snapshot) => frozenVideoTtsRuntime(snapshot),
+      options.videoTtsSynthesizer ? { synthesize: async (input) => {
+        await options.videoTtsSynthesizer!({
+          text: input.text, outputPath: input.outputPath, voice: input.voiceId, rate: input.rate,
+          language: input.language, scriptRevisionId: input.snapshot.scriptRevisionId,
+          scriptHash: input.snapshot.scriptContentHash, signal: input.signal,
+        });
+        return {};
+      } } : {},
+    ),
+    [VIDEO_RENDER_JOB_TYPE]: createVideoRenderJobHandler(connection.database, dataRoot),
     ...(options.jobHandlers ?? {}),
   };
   const supportedJobTypes = new Set(Object.keys(jobHandlers));
@@ -548,7 +625,39 @@ export function buildApp(options: BuildAppOptions = {}) {
   }));
 
   void app.register(registerModelConfigRoutes, { dataRoot });
-  void app.register(registerProjectVideoRoutes, { database: connection.database });
+  void app.register(registerProjectVideoRoutes, { database: connection.database, dataRoot });
+  void app.register(registerCreativeInputRoutes, { database: connection.database });
+  void app.register(registerVideoPlanRoutes, {
+    database: connection.database,
+    resolveTextModel: () => resolveChapterTextProvider(),
+  });
+  void app.register(registerVideoImageRoutes, {
+    database: connection.database,
+    dataRoot,
+    resolveImageProvider,
+  });
+  void app.register(registerVideoTtsRoutes, {
+    database: connection.database,
+    dataRoot,
+    resolveDefaultProvider: async () => {
+      const runtime = await resolveCurrentVideoTtsRuntime();
+      if (!runtime?.voiceId || !runtime.language || runtime.providerKind !== "edge-tts") return null;
+      const identity = resolveVideoTtsProviderIdentity(runtime, { voice: runtime.voiceId, rate: 0, language: runtime.language });
+      return { ...identity, voiceId: identity.voice, params: { contractVersion: identity.contractVersion } };
+    },
+    resolveProvider: async ({ voiceId, rate, language }) => {
+      if (typeof voiceId !== "string" || typeof rate !== "number" || typeof language !== "string") {
+        throw new VideoTtsStoreError(422, "配音配置无效");
+      }
+      const identity = resolveVideoTtsProviderIdentity(await resolveCurrentVideoTtsRuntime(), {
+        voice: voiceId, rate, language,
+      });
+      return { ...identity, voiceId: identity.voice, params: { contractVersion: identity.contractVersion } };
+    },
+  });
+  void app.register(registerVideoVisualTimelineRoutes, { database: connection.database });
+  void app.register(registerVideoVisualReviewRoutes, { database: connection.database });
+  void app.register(registerVideoRenderRoutes, { database: connection.database, dataRoot });
   void app.register(registerBookRoutes, { database: connection.database, dataRoot });
   void app.register(registerChapterRoutes, { database: connection.database });
   void app.register(registerExportRoutes, { database: connection.database, dataRoot });
@@ -1174,6 +1283,9 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     if (type === CONTACT_SHEET_REVIEW_JOB_TYPE) {
       return reply.code(400).send({ ok: false, message: "人工联系表审核任务只能通过当前联系表审核入口创建" });
+    }
+    if (type === VIDEO_PLAN_JOB_TYPE) {
+      return reply.code(400).send({ ok: false, message: "方案任务只能通过当前视频的“创建并生成方案”入口创建" });
     }
     let requestImageProvider: OpenAiImageConfig | null = null;
     let requestTextProvider: ChapterTextModelConfig | null = null;

@@ -58,7 +58,7 @@ test("本书专属提示词按书隔离、幂等保存并保留不可变历史�
   }
 });
 
-test("提示词 API 返回只读产品版本和用户可见的全书世界观标签", async () => {
+test("旧书籍提示词档案仍可独立保存且全局入口不展示书籍产品文案", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "narralume-book-prompt-api-"));
   const setup = openDatabase(dataRoot);
   setup.database.prepare(
@@ -70,7 +70,9 @@ test("提示词 API 返回只读产品版本和用户可见的全书世界观标
   try {
     const products = await app.inject({ method: "GET", url: "/api/product-prompts" });
     assert.equal(products.statusCode, 200);
-    assert.equal(products.json().titles.storyBibleFinal, "全书世界观（全书归一）");
+    assert.deepEqual(products.json().settings, {
+      scriptInstructions: "", visualInstructions: "", updatedAt: 0,
+    });
 
     const initial = await app.inject({ method: "GET", url: "/api/books/book/prompt-profile" });
     assert.equal(initial.statusCode, 200);

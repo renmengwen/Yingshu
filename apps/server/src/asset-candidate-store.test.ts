@@ -65,7 +65,7 @@ test("候选图统一校验三种格式、内容寻址、幂等审核与重启�
   try {
     assert.equal(
       connection.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      20,
+      25,
     );
     seedAsset(connection.database);
 

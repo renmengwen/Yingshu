@@ -11,7 +11,7 @@ import { registerProjectVideoRoutes } from "./project-video-routes.js";
 function buildProjectApp(dataRoot: string) {
   const connection = openDatabase(dataRoot);
   const app = Fastify({ logger: false });
-  void app.register(registerProjectVideoRoutes, { database: connection.database });
+  void app.register(registerProjectVideoRoutes, { database: connection.database, dataRoot });
   app.addHook("onClose", async () => connection.close());
   return app;
 }

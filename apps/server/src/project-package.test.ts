@@ -26,7 +26,7 @@ const TIMELINE = "a".repeat(64);
 const hash = (content: string | Buffer) => createHash("sha256").update(content).digest("hex");
 
 test("项目包恢复兼容版本是显式持久合同", () => {
-  assert.deepEqual(RESTORABLE_PROJECT_SCHEMA_VERSIONS, [13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(RESTORABLE_PROJECT_SCHEMA_VERSIONS, [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]);
 });
 
 async function put(root: string, relativePath: string, content: string | Buffer) {
@@ -123,6 +123,28 @@ async function mutateManifest(packagePath: string, mutate: (manifest: any) => vo
 
 function downgradeDatabaseToV14(database: DatabaseSync) {
   database.exec(`
+    DROP TABLE video_final_videos;
+    DROP TABLE video_render_chunks;
+    DROP TABLE video_render_runs;
+    DROP TABLE video_visual_review_events;
+    DROP TABLE video_visual_segments;
+    DROP TABLE video_visual_timelines;
+    DROP TABLE video_audio_review_events;
+    DROP TABLE video_tts_cues;
+    DROP TABLE video_tts_artifacts;
+    DROP TABLE video_tts_jobs;
+    DROP TABLE video_tts_snapshots;
+    DROP TABLE video_image_approval_events;
+    DROP TABLE video_image_candidates;
+    DROP TABLE video_image_batch_items;
+    DROP TABLE video_image_batches;
+    DROP TABLE video_plan_approvals;
+    DROP TABLE video_visual_revisions;
+    DROP TABLE video_script_revisions;
+    DROP TABLE video_plan_sources;
+    DROP TABLE video_plan_jobs;
+    DROP TABLE video_plan_snapshots;
+    DROP TABLE global_prompt_settings;
     DROP TABLE videos;
     DROP TABLE projects;
     DROP TABLE book_prompt_profiles;
@@ -143,6 +165,28 @@ function downgradeDatabaseToV14(database: DatabaseSync) {
 
 function downgradeDatabaseToV13(database: DatabaseSync) {
   database.exec(`
+    DROP TABLE video_final_videos;
+    DROP TABLE video_render_chunks;
+    DROP TABLE video_render_runs;
+    DROP TABLE video_visual_review_events;
+    DROP TABLE video_visual_segments;
+    DROP TABLE video_visual_timelines;
+    DROP TABLE video_audio_review_events;
+    DROP TABLE video_tts_cues;
+    DROP TABLE video_tts_artifacts;
+    DROP TABLE video_tts_jobs;
+    DROP TABLE video_tts_snapshots;
+    DROP TABLE video_image_approval_events;
+    DROP TABLE video_image_candidates;
+    DROP TABLE video_image_batch_items;
+    DROP TABLE video_image_batches;
+    DROP TABLE video_plan_approvals;
+    DROP TABLE video_visual_revisions;
+    DROP TABLE video_script_revisions;
+    DROP TABLE video_plan_sources;
+    DROP TABLE video_plan_jobs;
+    DROP TABLE video_plan_snapshots;
+    DROP TABLE global_prompt_settings;
     DROP TABLE videos;
     DROP TABLE projects;
     DROP TABLE book_prompt_profiles;
@@ -157,6 +201,28 @@ function downgradeDatabaseToV13(database: DatabaseSync) {
 
 function downgradeDatabaseToV17(database: DatabaseSync) {
   database.exec(`
+    DROP TABLE video_final_videos;
+    DROP TABLE video_render_chunks;
+    DROP TABLE video_render_runs;
+    DROP TABLE video_visual_review_events;
+    DROP TABLE video_visual_segments;
+    DROP TABLE video_visual_timelines;
+    DROP TABLE video_audio_review_events;
+    DROP TABLE video_tts_cues;
+    DROP TABLE video_tts_artifacts;
+    DROP TABLE video_tts_jobs;
+    DROP TABLE video_tts_snapshots;
+    DROP TABLE video_image_approval_events;
+    DROP TABLE video_image_candidates;
+    DROP TABLE video_image_batch_items;
+    DROP TABLE video_image_batches;
+    DROP TABLE video_plan_approvals;
+    DROP TABLE video_visual_revisions;
+    DROP TABLE video_script_revisions;
+    DROP TABLE video_plan_sources;
+    DROP TABLE video_plan_jobs;
+    DROP TABLE video_plan_snapshots;
+    DROP TABLE global_prompt_settings;
     DROP TABLE videos;
     DROP TABLE projects;
     DROP TABLE book_prompt_profiles;
@@ -269,7 +335,7 @@ test("合法 v14 项目包在私有 staging 升级到当前版本并保留完整
     try {
       assert.deepEqual(
         (restoredDatabase.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>).map((row) => row.version),
-        Array.from({ length: 20 }, (_, index) => index + 1),
+        Array.from({ length: 25 }, (_, index) => index + 1),
       );
       for (const [table, count] of Object.entries({
         episodes: 1, episode_sources: 1, script_versions: 2, script_version_sources: 2,
@@ -303,7 +369,7 @@ test("合法 v13 封存项目包恢复时升级到 v18", async () => {
     await restoreProjectPackage(packagePath, restored);
     const database = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 20);
+      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
       assert.equal(database.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
     } finally { database.close(); }
   } finally { await cleanup(current); }
@@ -339,7 +405,7 @@ test("合法 v17 项目包恢复时补齐 v18 合同列", async () => {
     await restoreProjectPackage(packagePath, restored);
     const database = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 20);
+      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
       assert.equal(database.prepare(
         "SELECT script_contract_version FROM script_versions WHERE id = ?",
       ).get(current.packagedScriptId)?.script_contract_version, 5);
@@ -445,7 +511,7 @@ test("项目包创建仍严格要求 v18，恢复拒绝未来或有缺口的迁�
         { packagePath, finalManifestRelativePath: current.finalManifestRelativePath });
       const database = new DatabaseSync(join(packagePath, "payload", "yingshu.sqlite3"));
       try {
-        if (kind === "future") database.prepare("INSERT INTO schema_migrations (version) VALUES (21)").run();
+        if (kind === "future") database.prepare("INSERT INTO schema_migrations (version) VALUES (26)").run();
         else database.prepare("DELETE FROM schema_migrations WHERE version=13").run();
       } finally { database.close(); }
       await refreshPackagedDatabaseIdentity(packagePath);

@@ -8,22 +8,11 @@ import {
   saveBookPromptProfile,
   type BookPromptProfileContent,
 } from "./book-prompt-profile-store.js";
-import {
-  PRODUCT_PROMPTS,
-  PRODUCT_PROMPT_SET_VERSION,
-  PRODUCT_PROMPT_TITLES,
-  PRODUCT_PROMPT_VERSIONS,
-} from "./product-prompts.js";
 
 export async function registerBookRoutes(
   app: FastifyInstance,
   options: { database: DatabaseSync; dataRoot: string },
 ) {
-  app.get("/api/product-prompts", async () => ({
-    ok: true, setVersion: PRODUCT_PROMPT_SET_VERSION, titles: PRODUCT_PROMPT_TITLES,
-    versions: PRODUCT_PROMPT_VERSIONS, prompts: PRODUCT_PROMPTS,
-  }));
-
   app.get<{ Params: { bookId: string } }>("/api/books/:bookId/prompt-profile", async (request, reply) => {
     if (!options.database.prepare("SELECT 1 FROM books WHERE id = ?").get(request.params.bookId)) {
       return reply.code(404).send({ ok: false, message: "书籍不存在" });

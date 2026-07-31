@@ -16,10 +16,23 @@ export interface Video {
   id: string;
   projectId: string;
   title: string;
-  status: "draft";
+  status: VideoStatus;
   createdAt: number;
   updatedAt: number;
 }
+
+export type VideoStatus =
+  | "draft"
+  | "preparing_sources"
+  | "generating_script"
+  | "planning_visuals"
+  | "awaiting_review"
+  | "producing_media"
+  | "awaiting_media_review"
+  | "rendering"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 interface ProjectRow {
   id: string;
@@ -36,7 +49,7 @@ interface VideoRow {
   id: string;
   project_id: string;
   title: string;
-  status: "draft";
+  status: VideoStatus;
   created_at: number;
   updated_at: number;
 }

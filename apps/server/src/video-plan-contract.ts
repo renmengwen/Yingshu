@@ -1,0 +1,257 @@
+import { createHash } from "node:crypto";
+
+import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
+import type { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
+
+export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
+export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
+export const VIDEO_PLAN_PROMPT_VERSION = "video-plan-prompt-v1";
+export const VIDEO_PLAN_WEB_CAPABILITY = "unsupported-v1";
+
+export type VideoPlanStatus = "draft" | "preparing_sources" | "generating_script" | "planning_visuals" |
+  "awaiting_review" | "failed" | "cancelled";
+
+export class VideoPlanError extends Error {
+  constructor(readonly statusCode: number, message: string) { super(message); }
+}
+
+export interface VideoPlanModelSnapshot {
+  providerId: string;
+  modelId: string;
+  protocol: "openai-response" | "anthropic-message";
+  baseUrl: string;
+  identityHash: string;
+}
+
+export interface FrozenVideoPlanSnapshot {
+  id: string;
+  videoId: string;
+  input: ReturnType<typeof getVideoInput>;
+  prompts: {
+    global: ReturnType<typeof getGlobalPromptSettings>;
+    project: ReturnType<typeof getProjectSettings>;
+    video: { scriptInstructions: string; visualInstructions: string };
+  };
+  model: VideoPlanModelSnapshot;
+  systemContractVersion: typeof VIDEO_PLAN_SYSTEM_CONTRACT_VERSION;
+  webCapability: typeof VIDEO_PLAN_WEB_CAPABILITY;
+  canonicalJson: string;
+  snapshotHash: string;
+  createdAt: number;
+  invalidatedAt: number | null;
+}
+
+export interface VideoPlanParagraph { id: string; text: string }
+export interface VideoScriptContent {
+  title: string;
+  summary: string;
+  narration: string;
+  estimatedCharacters: number;
+  estimatedDurationSeconds: number;
+  paragraphs: VideoPlanParagraph[];
+  sourceSummary: string[];
+  risks: string[];
+}
+
+export interface VideoVisualItem {
+  id: string;
+  paragraphId: string;
+  purpose: string;
+  description: string;
+  prompt: string;
+  negativePrompt: string;
+  suggestedDurationSeconds: number;
+  weight: number;
+  generationStatus: "not_generated";
+  currentCandidate: null;
+}
+export interface VideoVisualContent { visuals: VideoVisualItem[] }
+
+export interface VideoScriptRevision extends VideoScriptContent {
+  id: string;
+  revision: number;
+  contentHash: string;
+  createdAt: number;
+}
+
+export interface VideoVisualRevision extends VideoVisualContent {
+  id: string;
+  revision: number;
+  scriptRevisionId: string;
+  scriptContentHash: string;
+  contentHash: string;
+  createdAt: number;
+}
+
+export interface GenerateVideoPlanInput {
+  stage: "script" | "visual";
+  prompt: string;
+  signal: AbortSignal;
+  onActivity: () => void;
+}
+export type GenerateVideoPlan = (input: GenerateVideoPlanInput) => Promise<unknown>;
+
+export const VIDEO_PLAN_ID = /^[A-Za-z0-9_-]+$/u;
+export const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+export function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new VideoPlanError(400, "方案数据必须可以序列化");
+  return serialized;
+}
+
+export function planObject(value: unknown, label: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new VideoPlanError(422, `${label}无效`);
+  return value as Record<string, unknown>;
+}
+
+function exactFields(row: Record<string, unknown>, fields: readonly string[], label: string) {
+  if (Object.keys(row).some((key) => !fields.includes(key)) || fields.some((key) => !(key in row))) {
+    throw new VideoPlanError(422, `${label}字段无效`);
+  }
+}
+
+export function planText(value: unknown, label: string, maximum = 100_000) {
+  if (typeof value !== "string") throw new VideoPlanError(422, `${label}无效`);
+  const normalized = value.replace(/\r\n?/gu, "\n").trim();
+  if (!normalized || [...normalized].length > maximum) throw new VideoPlanError(422, `${label}无效`);
+  return normalized;
+}
+
+function optionalStringList(value: unknown, label: string, maximum = 30) {
+  if (!Array.isArray(value) || value.length > maximum) throw new VideoPlanError(422, `${label}无效`);
+  return value.map((item) => planText(item, label, 2_000));
+}
+
+function positiveNumber(value: unknown, label: string, maximum = 10_000) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > maximum) {
+    throw new VideoPlanError(422, `${label}无效`);
+  }
+  return value;
+}
+
+function stableId(prefix: string, snapshotHash: string, index: number, value: string) {
+  return `${prefix}_${sha256(`${snapshotHash}\0${index}\0${value}`).slice(0, 20)}`;
+}
+
+export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSnapshot): VideoScriptContent {
+  const row = planObject(value, "旁白方案输出");
+  exactFields(row, ["title", "summary", "narration", "paragraphs", "sourceSummary", "risks"], "旁白方案输出");
+  if (!Array.isArray(row.paragraphs) || row.paragraphs.length < 1 || row.paragraphs.length > 200) {
+    throw new VideoPlanError(422, "旁白段落列表无效");
+  }
+  const paragraphs = row.paragraphs.map((item, index) => {
+    const paragraph = planObject(item, "旁白段落");
+    exactFields(paragraph, ["text"], "旁白段落");
+    const paragraphText = planText(paragraph.text, "旁白段落正文", 20_000);
+    return { id: stableId("paragraph", snapshot.snapshotHash, index, paragraphText), text: paragraphText };
+  });
+  const narration = planText(row.narration, "完整旁白", 200_000);
+  if (narration.replace(/\s+/gu, "") !== paragraphs.map((item) => item.text).join("").replace(/\s+/gu, "")) {
+    throw new VideoPlanError(422, "完整旁白与段落正文不一致");
+  }
+  const estimatedCharacters = [...narration.replace(/\s+/gu, "")].length;
+  const maximumCharacters = Math.ceil(snapshot.input.targetDurationSeconds * 5.5);
+  // 中文可朗读稿只做预算估算；过短内容会直接破坏“目标时长量级”的产品合同。
+  if (estimatedCharacters < snapshot.input.targetDurationSeconds * 1.5) {
+    throw new VideoPlanError(422, "旁白明显短于目标时长，请重试生成完整内容");
+  }
+  if (estimatedCharacters > maximumCharacters) {
+    throw new VideoPlanError(422, `旁白明显长于目标时长，最多允许 ${maximumCharacters} 字`);
+  }
+  const sourceSummary = optionalStringList(row.sourceSummary, "来源摘要");
+  if (!snapshot.input.webEnabled && sourceSummary.length > 0) {
+    throw new VideoPlanError(422, "本次未联网核验，旁白方案不得包含来源摘要");
+  }
+  return {
+    title: planText(row.title, "标题建议", 100), summary: planText(row.summary, "内容摘要", 2_000), narration,
+    estimatedCharacters, estimatedDurationSeconds: Math.round(estimatedCharacters / 3.5), paragraphs,
+    sourceSummary, risks: optionalStringList(row.risks, "风险或待核对项"),
+  };
+}
+
+export function parseEditedParagraphs(value: unknown, current: VideoScriptContent) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 200) throw new VideoPlanError(400, "旁白段落列表无效");
+  const known = new Set(current.paragraphs.map((item) => item.id));
+  const seen = new Set<string>();
+  return value.map((item) => {
+    const row = planObject(item, "旁白段落");
+    exactFields(row, ["id", "text"], "旁白段落");
+    const id = planText(row.id, "段落 ID", 100);
+    if (!known.has(id) || seen.has(id)) throw new VideoPlanError(409, "旁白段落身份已变化，请刷新后重试");
+    seen.add(id);
+    return { id, text: planText(row.text, "旁白段落正文", 20_000) };
+  });
+}
+
+export function parseGeneratedVisual(value: unknown, snapshot: FrozenVideoPlanSnapshot, script: VideoScriptContent): VideoVisualContent {
+  const row = planObject(value, "画面方案输出");
+  exactFields(row, ["visuals"], "画面方案输出");
+  return parseVisualItems(row.visuals, snapshot, script, false);
+}
+
+export function parseVisualItems(value: unknown, snapshot: FrozenVideoPlanSnapshot, script: VideoScriptContent, editing: boolean): VideoVisualContent {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 300) throw new VideoPlanError(422, "画面列表无效");
+  const paragraphIds = new Set(script.paragraphs.map((item) => item.id));
+  const seen = new Set<string>();
+  const visuals = value.map((item, index) => {
+    const row = planObject(item, "画面项");
+    exactFields(row, editing
+      ? ["id", "paragraphId", "purpose", "description", "prompt", "negativePrompt", "suggestedDurationSeconds", "weight", "generationStatus", "currentCandidate"]
+      : ["paragraphId", "purpose", "description", "prompt", "negativePrompt", "suggestedDurationSeconds", "weight"], "画面项");
+    if (editing && (row.generationStatus !== "not_generated" || row.currentCandidate !== null)) {
+      throw new VideoPlanError(422, "本阶段画面必须保持未生成状态");
+    }
+    const paragraphId = planText(row.paragraphId, "关联段落 ID", 100);
+    if (!paragraphIds.has(paragraphId)) throw new VideoPlanError(422, "画面引用了未知旁白段落");
+    const description = planText(row.description, "中文画面描述", 4_000);
+    const id = editing && typeof row.id === "string" && VIDEO_PLAN_ID.test(row.id)
+      ? row.id : stableId("visual", snapshot.snapshotHash, index, `${paragraphId}\0${description}`);
+    if (seen.has(id)) throw new VideoPlanError(422, "画面 ID 重复");
+    seen.add(id);
+    return {
+      id, paragraphId, purpose: planText(row.purpose, "画面用途", 500), description,
+      prompt: planText(row.prompt, "生图 Prompt", 8_000), negativePrompt: planText(row.negativePrompt, "负面 Prompt", 4_000),
+      suggestedDurationSeconds: positiveNumber(row.suggestedDurationSeconds, "建议时长", 600),
+      weight: positiveNumber(row.weight, "画面权重", 100), generationStatus: "not_generated" as const, currentCandidate: null,
+    };
+  });
+  return { visuals };
+}
+
+export function createVideoPlanModelSnapshot(config: ChapterTextModelConfig): VideoPlanModelSnapshot {
+  const providerId = planText(config.providerId, "文本模型 provider", 100);
+  const modelId = planText(config.model, "文本模型", 200);
+  const protocol = config.protocol ?? "openai-response";
+  const baseUrl = planText(config.baseUrl, "文本模型地址", 2_000).replace(/\/+$/u, "");
+  return { providerId, modelId, protocol, baseUrl, identityHash: sha256(canonical({ providerId, modelId, protocol, baseUrl })) };
+}
+
+export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot) {
+  return [
+    "【固定系统合同】", "生成中文旁白方案。参考文本只有 referenceRole=content_source 时才可作为事实资料；style_only 仅参考表达方式。",
+    "不得伪造人物、数字、引文、URL 或来源。短主题应扩写成目标时长量级的完整讲解，不重复观点凑字数。",
+    `系统合同版本：${snapshot.systemContractVersion}；输出版本：${VIDEO_PLAN_PROMPT_VERSION}。`,
+    "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。不得增加字段或 Markdown。",
+    "【全局补充】", snapshot.prompts.global.scriptInstructions || "（无）", "【项目补充】", snapshot.prompts.project.scriptInstructions || "（无）",
+    "【视频补充】", snapshot.prompts.video.scriptInstructions || "（无）",
+    "【当前操作】", JSON.stringify({ input: snapshot.input, webEnabled: false, sourcePolicy: "本次未联网核验" }),
+  ].join("\n\n");
+}
+
+export function visualPrompt(snapshot: FrozenVideoPlanSnapshot, script: VideoScriptRevision) {
+  return [
+    "【固定系统合同】", "为已生成旁白规划 9:16、1080×1920 的语义画面草案，不调用图片模型。图片内可读中文默认交给渲染层。",
+    "每个画面必须关联真实 paragraphId。generationStatus/currentCandidate 由系统补齐，不要输出。",
+    "严格输出 JSON：{\"visuals\":[{\"paragraphId\":\"\",\"purpose\":\"\",\"description\":\"\",\"prompt\":\"\",\"negativePrompt\":\"\",\"suggestedDurationSeconds\":1,\"weight\":1}]}。不得增加字段或 Markdown。",
+    "【全局补充】", snapshot.prompts.global.visualInstructions || "（无）", "【项目补充】", snapshot.prompts.project.visualInstructions || "（无）",
+    "【视频补充】", snapshot.prompts.video.visualInstructions || "（无）",
+    "【当前操作】", JSON.stringify({ visualDensity: snapshot.input.visualDensity, targetDurationSeconds: snapshot.input.targetDurationSeconds,
+      script: { title: script.title, summary: script.summary, paragraphs: script.paragraphs } }),
+  ].join("\n\n");
+}
