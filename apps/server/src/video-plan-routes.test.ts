@@ -204,15 +204,19 @@ test("buildApp 完成关闭联网的方案生成、幂等、跨项目保护与�
   }
 });
 
-test("buildApp 在联网能力不受支持时返回 409 且不创建方案 Job", async () => {
+test("buildApp 接受联网方案并冻结搜索来源", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-video-plan-web-blocked-"));
   let generatorCalls = 0;
   const app = buildApp({
     dataRoot,
     logger: false,
     chapterTextProvider: textProvider,
-    videoPlanGenerator: async () => { generatorCalls += 1; return {}; },
-    jobPollMs: 50,
+    videoPlanGenerator: async ({ stage, prompt }) => {
+      generatorCalls += 1;
+      return stage === "script" ? generatedScript() : generatedVisuals(prompt);
+    },
+    videoPlanWebSearch: async () => [{ title: "联网来源", url: "https://example.com/source", summary: "可核验摘要" }],
+    jobPollMs: 5,
     pipelinePollMs: 60_000,
   });
   try {
@@ -224,14 +228,15 @@ test("buildApp 在联网能力不受支持时返回 409 且不创建方案 Job",
     const before = (await app.inject({ method: "GET", url: `${baseUrl}/plan-job` })).json();
     assert.equal(before.job, null);
 
-    const blocked = await app.inject({
+    const created = await app.inject({
       method: "POST", url: `${baseUrl}/plan-jobs`, payload: { idempotencyKey: "web-plan-request" },
     });
-    assert.equal(blocked.statusCode, 409);
-    assert.match(blocked.json().message, /联网|关闭/u);
-    const after = (await app.inject({ method: "GET", url: `${baseUrl}/plan-job` })).json();
-    assert.equal(after.job, null);
-    assert.equal(generatorCalls, 0);
+    assert.equal(created.statusCode, 200);
+    await waitForPlanJob(app, `${baseUrl}/plan-job`);
+    const after = (await app.inject({ method: "GET", url: `${baseUrl}/sources` })).json();
+    assert.equal(after.webEnabled, true);
+    assert.equal(after.items[0].url, "https://example.com/source");
+    assert.equal(generatorCalls, 2);
   } finally {
     await app.close();
     await rm(dataRoot, { recursive: true, force: true });

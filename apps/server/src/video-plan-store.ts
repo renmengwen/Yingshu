@@ -7,6 +7,7 @@ import { cancelActiveVideoImageJobs } from "./video-image-invalidation.js";
 import {
   canonical, type FrozenVideoPlanSnapshot, parseEditedParagraphs, parseVisualItems, planObject, planText,
   scriptPrompt, sha256, VideoPlanError, type VideoPlanModelSnapshot, type VideoPlanStatus,
+  type VideoPlanSourceEvidence,
   type VideoScriptContent, type VideoScriptRevision, type VideoVisualContent, type VideoVisualRevision,
   VIDEO_PLAN_PROMPT_VERSION, VIDEO_PLAN_SYSTEM_CONTRACT_VERSION, VIDEO_PLAN_WEB_CAPABILITY,
 } from "./video-plan-contract.js";
@@ -129,6 +130,14 @@ export function getVideoPlanSources(database: DatabaseSync, projectId: string, v
   return { webEnabled: plan.webEnabled, items };
 }
 
+export function getFrozenVideoPlanSources(database: DatabaseSync, videoId: string, snapshotId: string) {
+  return database.prepare(
+    `SELECT id,source_index AS sourceIndex,query,provider,tool,retrieved_at AS retrievedAt,url,title,
+     usage_summary AS usageSummary FROM video_plan_sources
+     WHERE video_id = ? AND snapshot_id = ? AND status = 'succeeded' ORDER BY source_index,id`,
+  ).all(videoId, snapshotId) as unknown as VideoPlanSourceEvidence[];
+}
+
 export function getVideoPlanJob(database: DatabaseSync, projectId: string, videoId: string) {
   getVideo(database, projectId, videoId);
   const row = database.prepare(
@@ -167,11 +176,12 @@ export function saveVideoScriptRevision(database: DatabaseSync, projectId: strin
     sourceSummary: current.sourceSummary, risks: current.risks,
   };
   const id = `vsr_${randomUUID()}`;
+  const sources = getFrozenVideoPlanSources(database, videoId, snapshot.id);
   database.prepare(
     `INSERT INTO video_script_revisions (id,video_id,snapshot_id,revision,content_json,content_hash,
      provider_id,model_id,prompt_version,prompt_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
   ).run(id, videoId, snapshot.id, nextVideoScriptRevision(database, videoId), JSON.stringify(content), sha256(canonical(content)),
-    snapshot.model.providerId, snapshot.model.modelId, VIDEO_PLAN_PROMPT_VERSION, sha256(scriptPrompt(snapshot)), now);
+    snapshot.model.providerId, snapshot.model.modelId, VIDEO_PLAN_PROMPT_VERSION, sha256(scriptPrompt(snapshot, sources)), now);
   cancelActiveVideoImageJobs(database, videoId, now);
   return getVideoPlan(database, projectId, videoId);
 }

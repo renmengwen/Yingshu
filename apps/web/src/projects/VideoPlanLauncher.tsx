@@ -12,8 +12,7 @@ export function VideoPlanLauncher({ input, dirty, busy, modelLabel, modelAvailab
   modelAvailable: boolean;
   onStart: () => void;
 }) {
-  const webBlocked = input.webEnabled;
-  const disabled = dirty || busy || !modelAvailable || webBlocked;
+  const disabled = dirty || busy || !modelAvailable;
   return <section className="border-t border-[var(--border-subtle)] pt-6" aria-labelledby="plan-launch-heading">
     <h3 id="plan-launch-heading" className="text-base font-semibold">创建文案与画面方案</h3>
     <p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">启动时会冻结当前输入、提示词、联网开关和文本模型配置。后续设置变化不会改写本次任务。</p>
@@ -23,7 +22,7 @@ export function VideoPlanLauncher({ input, dirty, busy, modelLabel, modelAvailab
       <div><dt className="text-[var(--fg-tertiary)]">联网</dt><dd className="mt-1">{input.webEnabled ? "已开启" : "已关闭，本次不联网核验"}</dd></div>
       <div><dt className="text-[var(--fg-tertiary)]">预计步骤</dt><dd className="mt-1">资料准备 → 旁白 → 画面规划</dd></div>
     </dl>
-    {webBlocked ? <p className="mt-4 border border-[var(--warning)] bg-[var(--warning-soft)] px-3 py-3 text-sm leading-6 text-[var(--warning)]" role="alert">当前文本模型没有受支持的联网来源返回路径，无法执行开启联网的任务。请关闭“本次允许联网”并保存草稿后再生成。</p> : null}
+    {input.webEnabled ? <p className="mt-4 border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-3 py-3 text-sm leading-6 text-[var(--fg-secondary)]">创建后会先执行联网检索；只有获得可核验来源，才会继续生成并冻结本次使用的 URL、标题与摘要。</p> : null}
     {!modelAvailable ? <p className="mt-4 text-sm text-[var(--danger)]" role="alert">文本模型不可用。请先在设置中选择并保存分析与改编模型。</p> : null}
     <div className="mt-5 flex flex-wrap items-center gap-3">
       <AlertDialog>

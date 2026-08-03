@@ -10,13 +10,15 @@ import { textModelCallError, textModelResultError } from "./text-model-stream.js
 import {
   canonical, createVideoPlanModelSnapshot, type FrozenVideoPlanSnapshot, type GenerateVideoPlan,
   parseGeneratedScript, parseGeneratedVisual, planObject, planText, scriptPrompt, sha256, VideoPlanError,
+  type VideoPlanSourceEvidence,
   type VideoScriptContent, type VideoVisualContent, VIDEO_PLAN_ID, VIDEO_PLAN_JOB_TYPE, VIDEO_PLAN_PROMPT_VERSION,
   VIDEO_PLAN_SYSTEM_CONTRACT_VERSION, VIDEO_PLAN_WEB_CAPABILITY, visualPrompt,
 } from "./video-plan-contract.js";
 import {
-  getVideoPlanSnapshot, isLatestValidVideoPlanSnapshot, latestVideoScript, latestVideoVisual,
+  getFrozenVideoPlanSources, getVideoPlanSnapshot, isLatestValidVideoPlanSnapshot, latestVideoScript, latestVideoVisual,
   nextVideoScriptRevision, nextVideoVisualRevision,
 } from "./video-plan-store.js";
+import { createVideoPlanWebSearch, type SearchVideoPlanWeb } from "./video-plan-web-search.js";
 
 export type CreateVideoPlanGenerator = (config: ChapterTextModelConfig) => GenerateVideoPlan;
 export type VideoPlanGeneratorSource = GenerateVideoPlan | { create: CreateVideoPlanGenerator };
@@ -32,9 +34,6 @@ export function enqueueVideoPlanJob(database: DatabaseSync, input: {
   const idempotencyKey = planText(input.idempotencyKey, "幂等键", 200);
   if (!VIDEO_PLAN_ID.test(idempotencyKey)) throw new VideoPlanError(400, "幂等键只能包含字母、数字、下划线或连字符");
   const draft = getVideoInput(database, input.projectId, input.videoId);
-  if (draft.webEnabled) {
-    throw new VideoPlanError(409, "当前文本模型没有受支持的真实联网路径。请关闭联网核验后重试，或切换到后续支持联网的模型");
-  }
   const model = createVideoPlanModelSnapshot(input.config);
   const prompts = {
     global: getGlobalPromptSettings(database), project: getProjectSettings(database, input.projectId),
@@ -98,6 +97,7 @@ async function callWithCancellation(context: JobExecutionContext, stage: "script
 export function createVideoPlanJobHandler(
   database: DatabaseSync, configOrResolver: ChapterTextModelConfig | ResolveVideoPlanModel,
   generatorSource: VideoPlanGeneratorSource,
+  search?: SearchVideoPlanWeb,
 ): JobHandler {
   return async (context) => {
     let snapshot: FrozenVideoPlanSnapshot | undefined;
@@ -121,6 +121,39 @@ export function createVideoPlanJobHandler(
         ...currentConfig, providerId: snapshot.model.providerId, model: snapshot.model.modelId,
         protocol: snapshot.model.protocol, baseUrl: snapshot.model.baseUrl,
       });
+      const searchWeb = search ?? createVideoPlanWebSearch(currentConfig);
+      let sources = getFrozenVideoPlanSources(database, snapshot.videoId, snapshot.id);
+      if (snapshot.input.webEnabled && sources.length < 1) {
+        context.throwIfCancellationRequested();
+        const controller = new AbortController();
+        const poll = setInterval(() => { if (context.isCancellationRequested()) controller.abort(); }, 50);
+        let found;
+        try { found = await searchWeb({ query: videoPlanSearchQuery(snapshot), limit: 5, signal: controller.signal }); }
+        catch (error) {
+          if (controller.signal.aborted || context.isCancellationRequested()) throw new JobCancelledError();
+          throw new VideoPlanError(502, error instanceof Error ? error.message : "联网搜索失败");
+        } finally { clearInterval(poll); }
+        if (found.length < 1) throw new VideoPlanError(502, "联网搜索没有返回可用来源");
+        const retrievedAt = Date.now();
+        const query = videoPlanSearchQuery(snapshot);
+        sources = found.map((source, sourceIndex): VideoPlanSourceEvidence => ({
+          id: `vpsrc_${sha256(`${snapshot!.id}\0${sourceIndex}\0${source.url}`).slice(0, 32)}`,
+          sourceIndex, query, provider: snapshot!.model.providerId,
+          tool: snapshot!.model.protocol === "anthropic-message" ? "web_search_20250305" : "web_search",
+          retrievedAt, url: source.url, title: source.title, usageSummary: source.summary,
+        }));
+        const inputHash = sha256(canonical(sources));
+        context.commitCheckpoint("video-plan-sources", snapshot.id, inputHash, (transaction) => {
+          for (const source of sources) transaction.run(
+            `INSERT INTO video_plan_sources (id,video_id,snapshot_id,source_index,query,provider,tool,retrieved_at,
+             url,title,usage_summary,audit_excerpt,content_hash,status,failure_summary,created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'succeeded',NULL,?)`,
+            source.id, snapshot!.videoId, snapshot!.id, source.sourceIndex, source.query, source.provider, source.tool,
+            source.retrievedAt, source.url, source.title, source.usageSummary, source.usageSummary,
+            sha256(canonical(source)), retrievedAt,
+          );
+        }, { count: sources.length, inputHash });
+      }
       database.prepare("UPDATE videos SET status = 'generating_script', updated_at = ? WHERE id = ?")
         .run(Date.now(), snapshot.videoId);
 
@@ -128,9 +161,10 @@ export function createVideoPlanJobHandler(
       const scriptInputHash = sha256(`${snapshot.snapshotHash}\0script\0${VIDEO_PLAN_PROMPT_VERSION}`);
       const scriptCheckpoint = context.getCheckpoint("video-plan-script", snapshot.id);
       if (!script || scriptCheckpoint?.inputHash !== scriptInputHash) {
-        const raw = await callWithCancellation(context, "script", scriptPrompt(snapshot), generate);
+        const prompt = scriptPrompt(snapshot, sources);
+        const raw = await callWithCancellation(context, "script", prompt, generate);
         let content: VideoScriptContent;
-        try { content = parseGeneratedScript(raw, snapshot); }
+        try { content = parseGeneratedScript(raw, snapshot, sources); }
         catch (error) { throw raw && typeof raw === "object" ? textModelResultError(error, "video-plan:script", raw) : textModelCallError(error, "video-plan:script"); }
         const contentHash = sha256(canonical(content));
         const id = `vsr_${randomUUID()}`;
@@ -140,7 +174,7 @@ export function createVideoPlanJobHandler(
             `INSERT INTO video_script_revisions (id,video_id,snapshot_id,revision,content_json,content_hash,
              provider_id,model_id,prompt_version,prompt_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             id, snapshot!.videoId, snapshot!.id, nextVideoScriptRevision(database, snapshot!.videoId), JSON.stringify(content), contentHash,
-            snapshot!.model.providerId, snapshot!.model.modelId, VIDEO_PLAN_PROMPT_VERSION, sha256(scriptPrompt(snapshot!)), createdAt,
+            snapshot!.model.providerId, snapshot!.model.modelId, VIDEO_PLAN_PROMPT_VERSION, sha256(prompt), createdAt,
           );
         }, { id, contentHash });
         script = latestVideoScript(database, snapshot.videoId, snapshot.id)!;
@@ -187,4 +221,9 @@ export function createVideoPlanJobHandler(
       throw error;
     }
   };
+}
+
+function videoPlanSearchQuery(snapshot: FrozenVideoPlanSnapshot) {
+  const value = snapshot.input.inputMode === "topic" ? snapshot.input.topic : snapshot.input.body;
+  return value.replace(/\s+/gu, " ").trim().slice(0, 120);
 }

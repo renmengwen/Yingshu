@@ -6,7 +6,7 @@ import type { getGlobalPromptSettings, getProjectSettings, getVideoInput } from 
 export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
 export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
 export const VIDEO_PLAN_PROMPT_VERSION = "video-plan-prompt-v1";
-export const VIDEO_PLAN_WEB_CAPABILITY = "unsupported-v1";
+export const VIDEO_PLAN_WEB_CAPABILITY = "model-web-search-v1";
 
 export type VideoPlanStatus = "draft" | "preparing_sources" | "generating_script" | "planning_visuals" |
   "awaiting_review" | "failed" | "cancelled";
@@ -42,6 +42,17 @@ export interface FrozenVideoPlanSnapshot {
 }
 
 export interface VideoPlanParagraph { id: string; text: string }
+export interface VideoPlanSourceEvidence {
+  id: string;
+  sourceIndex: number;
+  query: string;
+  provider: string;
+  tool: string;
+  retrievedAt: number;
+  url: string;
+  title: string;
+  usageSummary: string;
+}
 export interface VideoScriptContent {
   title: string;
   summary: string;
@@ -139,7 +150,7 @@ function stableId(prefix: string, snapshotHash: string, index: number, value: st
   return `${prefix}_${sha256(`${snapshotHash}\0${index}\0${value}`).slice(0, 20)}`;
 }
 
-export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSnapshot): VideoScriptContent {
+export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSnapshot, sources: readonly VideoPlanSourceEvidence[] = []): VideoScriptContent {
   const row = planObject(value, "旁白方案输出");
   exactFields(row, ["title", "summary", "narration", "paragraphs", "sourceSummary", "risks"], "旁白方案输出");
   if (!Array.isArray(row.paragraphs) || row.paragraphs.length < 1 || row.paragraphs.length > 200) {
@@ -164,10 +175,15 @@ export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSn
   if (estimatedCharacters > maximumCharacters) {
     throw new VideoPlanError(422, `旁白明显长于目标时长，最多允许 ${maximumCharacters} 字`);
   }
-  const sourceSummary = optionalStringList(row.sourceSummary, "来源摘要");
-  if (!snapshot.input.webEnabled && sourceSummary.length > 0) {
+  const generatedSourceSummary = optionalStringList(row.sourceSummary, "来源摘要");
+  if (!snapshot.input.webEnabled && generatedSourceSummary.length > 0) {
     throw new VideoPlanError(422, "本次未联网核验，旁白方案不得包含来源摘要");
   }
+  if (snapshot.input.webEnabled && sources.length < 1) throw new VideoPlanError(422, "联网方案缺少冻结来源");
+  // 来源摘要由已冻结搜索结果确定，不能采用模型自行生成、无法核验的引用。
+  const sourceSummary = snapshot.input.webEnabled
+    ? sources.map((source) => `${source.title}：${source.usageSummary || source.url}`)
+    : [];
   return {
     title: planText(row.title, "标题建议", 100), summary: planText(row.summary, "内容摘要", 2_000), narration,
     estimatedCharacters, estimatedDurationSeconds: Math.round(estimatedCharacters / 3.5), paragraphs,
@@ -232,15 +248,20 @@ export function createVideoPlanModelSnapshot(config: ChapterTextModelConfig): Vi
   return { providerId, modelId, protocol, baseUrl, identityHash: sha256(canonical({ providerId, modelId, protocol, baseUrl })) };
 }
 
-export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot) {
+export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonly VideoPlanSourceEvidence[] = []) {
   return [
     "【固定系统合同】", "生成中文旁白方案。参考文本只有 referenceRole=content_source 时才可作为事实资料；style_only 仅参考表达方式。",
     "不得伪造人物、数字、引文、URL 或来源。短主题应扩写成目标时长量级的完整讲解，不重复观点凑字数。",
     `系统合同版本：${snapshot.systemContractVersion}；输出版本：${VIDEO_PLAN_PROMPT_VERSION}。`,
-    "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。不得增加字段或 Markdown。",
+    "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。sourceSummary 保持空数组，由系统根据冻结来源补齐；不得增加字段或 Markdown。",
     "【全局补充】", snapshot.prompts.global.scriptInstructions || "（无）", "【项目补充】", snapshot.prompts.project.scriptInstructions || "（无）",
     "【视频补充】", snapshot.prompts.video.scriptInstructions || "（无）",
-    "【当前操作】", JSON.stringify({ input: snapshot.input, webEnabled: false, sourcePolicy: "本次未联网核验" }),
+    "【当前操作】", JSON.stringify({
+      input: snapshot.input,
+      webEnabled: snapshot.input.webEnabled,
+      sourcePolicy: snapshot.input.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
+      sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })),
+    }),
   ].join("\n\n");
 }
 

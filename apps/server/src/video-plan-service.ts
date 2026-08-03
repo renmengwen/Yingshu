@@ -2,3 +2,4 @@
 export * from "./video-plan-contract.js";
 export * from "./video-plan-job.js";
 export * from "./video-plan-store.js";
+export * from "./video-plan-web-search.js";

@@ -95,16 +95,16 @@ test("提示词层级身份固定且输入表单呈现准确范围与空状态",
   assert.doesNotMatch(html, /provider|费用|书籍|章节|系列|分集/);
 });
 
-test("生成确认明确模型、联网阻断、步骤与不会生成下游资产", () => {
+test("生成确认明确模型、联网来源冻结、步骤与不会生成下游资产", () => {
   const html = renderToString(createElement(VideoPlanLauncher, {
     input: input({ webEnabled: true }), dirty: false, busy: false,
     modelLabel: "本地 fixture / text-model", modelAvailable: true, onStart: () => undefined,
   }));
   assert.match(html, /本地 fixture \/ text-model/);
   assert.match(html, /资料准备 → 旁白 → 画面规划/);
-  assert.match(html, /关闭“本次允许联网”并保存草稿/);
+  assert.match(html, /只有获得可核验来源/);
   assert.match(html, /不会自动生成图片、TTS、字幕或视频/);
-  assert.match(html, /disabled=""/);
+  assert.doesNotMatch(html, /disabled=""/);
 });
 
 test("方案编辑校验稳定段落关系并只允许运行中任务取消", () => {

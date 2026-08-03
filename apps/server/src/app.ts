@@ -27,6 +27,7 @@ import { registerVideoPlanRoutes } from "./video-plan-routes.js";
 import {
   createVideoPlanJobHandler,
   type GenerateVideoPlan,
+  type SearchVideoPlanWeb,
   VIDEO_PLAN_JOB_TYPE,
 } from "./video-plan-service.js";
 import { registerExportRoutes } from "./export-routes.js";
@@ -212,6 +213,7 @@ interface BuildAppOptions {
   episodeScriptGenerator?: GenerateEpisodeScript;
   assetPromptDraftGenerator?: GenerateAssetPromptDraft;
   videoPlanGenerator?: GenerateVideoPlan;
+  videoPlanWebSearch?: SearchVideoPlanWeb;
   videoTtsSynthesizer?: SynthesizeVideoTts;
 }
 
@@ -486,6 +488,7 @@ export function buildApp(options: BuildAppOptions = {}) {
         connection.database,
         resolveVideoPlanProvider,
         options.videoPlanGenerator ?? { create: createVideoPlanGenerator },
+        options.videoPlanWebSearch,
       )(context);
     },
     [EPISODE_PLAN_JOB_TYPE]: async (context: JobExecutionContext) => {

@@ -74,16 +74,33 @@ function visualOutput(prompt: string) {
   })) };
 }
 
-test("开启联网但没有受支持能力时，不创建快照或 Job", async () => {
+test("开启联网时冻结搜索来源、只搜索一次并把来源交给旁白模型", async () => {
   const value = await fixture(true);
+  let searchCalls = 0;
+  let scriptPrompt = "";
   try {
-    assert.throws(() => enqueueVideoPlanJob(value.connection.database, {
-      projectId: value.project.id, videoId: value.video.id, idempotencyKey: "web-blocked", config,
-    }), (error: unknown) => error instanceof VideoPlanError && error.statusCode === 409);
-    assert.equal((value.connection.database.prepare("SELECT COUNT(*) AS count FROM video_plan_snapshots")
-      .get() as { count: number }).count, 0);
-    assert.equal(value.connection.database.prepare("SELECT COUNT(*) AS count FROM jobs WHERE type = ?")
-      .get(VIDEO_PLAN_JOB_TYPE)?.count, 0);
+    enqueueVideoPlanJob(value.connection.database, {
+      projectId: value.project.id, videoId: value.video.id, idempotencyKey: "web-enabled", config,
+    });
+    const worker = new JobWorker(value.connection.database, {
+      [VIDEO_PLAN_JOB_TYPE]: createVideoPlanJobHandler(value.connection.database, config, async ({ stage, prompt }) => {
+        if (stage === "script") { scriptPrompt = prompt; return scriptOutput(); }
+        return visualOutput(prompt);
+      }, async ({ query }) => {
+        searchCalls += 1;
+        assert.equal(query, "为什么天空是蓝色的");
+        return [{ title: "天空颜色科普", url: "https://example.com/sky", summary: "短波蓝光更容易发生瑞利散射。" }];
+      }),
+    }, { workerId: "web-enabled-worker", leaseMs: 10_000, heartbeatMs: 1_000 });
+    await worker.runOne();
+    assert.equal(searchCalls, 1);
+    assert.match(scriptPrompt, /https:\/\/example\.com\/sky/u);
+    const sources = getVideoPlanSources(value.connection.database, value.project.id, value.video.id);
+    assert.equal(sources.webEnabled, true);
+    assert.equal(sources.items.length, 1);
+    assert.equal((sources.items[0] as { title: string }).title, "天空颜色科普");
+    assert.deepEqual(getVideoPlan(value.connection.database, value.project.id, value.video.id)?.script.sourceSummary,
+      ["天空颜色科普：短波蓝光更容易发生瑞利散射。"]);
   } finally {
     value.connection.close();
     await rm(value.dataRoot, { recursive: true, force: true });

@@ -8,7 +8,7 @@ import type { ChapterTextModelConfig } from "../chapter-event-analyzer.js";
 import type { GenerateVideoPlan } from "../video-plan-service.js";
 
 const HOST = "127.0.0.1";
-const PORT = 3102;
+const PORT = Number(process.env.PORT ?? 3102);
 const BASE_URL = `http://${HOST}:${PORT}`;
 const startedAt = Date.now();
 const serve = process.argv.includes("--serve");
@@ -123,6 +123,9 @@ try {
     logger: false,
     chapterTextProvider: provider,
     videoPlanGenerator: generator,
+    videoPlanWebSearch: async ({ query }) => [{
+      title: "天空颜色科普来源", url: "https://example.com/sky", summary: `${query}的可核验摘要`,
+    }],
     jobPollMs: 500,
     pipelinePollMs: 60_000,
     jobWorker: { workerId: "video-plan-mvp-gate", retryDelayMs: 0 },
@@ -140,22 +143,11 @@ try {
     method: "PUT", body: JSON.stringify(input(true)),
   });
   assert.equal((await jsonRequest(`${ownerBase}/plan-job`)).job, null);
-  const callsBeforeWebBlock = generatorCalls;
-  const webBlocked = await jsonRequest(`${ownerBase}/plan-jobs`, {
-    method: "POST", body: JSON.stringify({ idempotencyKey: "web-enabled" }),
-  }, 409);
-  assert.match(webBlocked.message, /联网|关闭/u);
-  assert.equal((await jsonRequest(`${ownerBase}/plan-job`)).job, null);
-  assert.equal(generatorCalls, callsBeforeWebBlock);
-
-  await jsonRequest(`${ownerBase}/input`, {
-    method: "PUT", body: JSON.stringify(input(false)),
-  });
   const firstJob = (await jsonRequest(`${ownerBase}/plan-jobs`, {
-    method: "POST", body: JSON.stringify({ idempotencyKey: "main-plan" }),
+    method: "POST", body: JSON.stringify({ idempotencyKey: "web-enabled" }),
   })).job;
   const repeatedJob = (await jsonRequest(`${ownerBase}/plan-jobs`, {
-    method: "POST", body: JSON.stringify({ idempotencyKey: "main-plan" }),
+    method: "POST", body: JSON.stringify({ idempotencyKey: "web-enabled" }),
   })).job;
   assert.equal(repeatedJob.id, firstJob.id);
   await jsonRequest(`${ownerBase}/plan-jobs`, {
@@ -172,7 +164,9 @@ try {
   assert.equal(initial.visual.revision, 1);
   assert.ok(initial.visual.visuals.every((visual: Record<string, unknown>) =>
     visual.generationStatus === "not_generated" && visual.currentCandidate === null));
-  assert.deepEqual(await jsonRequest(`${ownerBase}/sources`), { ok: true, webEnabled: false, items: [] });
+  const initialSources = await jsonRequest(`${ownerBase}/sources`);
+  assert.equal(initialSources.webEnabled, true);
+  assert.equal(initialSources.items[0].url, "https://example.com/sky");
 
   const scriptPlan = (await jsonRequest(`${ownerBase}/script-revisions`, {
     method: "POST",
@@ -253,6 +247,7 @@ try {
     logger: false,
     chapterTextProvider: provider,
     videoPlanGenerator: generator,
+    videoPlanWebSearch: async () => assert.fail("恢复已完成任务时不得重新搜索"),
     jobPollMs: 500,
     pipelinePollMs: 60_000,
     jobWorker: { workerId: "video-plan-mvp-gate-restarted", retryDelayMs: 0 },
@@ -267,15 +262,15 @@ try {
   assert.equal(recoveredPlan.script.revision, 2);
   assert.equal(recoveredPlan.visual.revision, 2);
   assert.equal(recoveredPlan.approval.valid, true);
-  assert.deepEqual(recoveredSources, { ok: true, webEnabled: false, items: [] });
+  assert.equal(recoveredSources.webEnabled, true);
+  assert.equal(recoveredSources.items[0].url, "https://example.com/sky");
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
     gate: "video-plan-mvp-phase-b",
     listen: `${HOST}:${PORT}`,
     health: true,
-    web_capability_blocked: true,
-    web_block_generator_calls: 0,
+    web_capability: "model-web-search-v1",
     idempotent_job_id: firstJob.id,
     unique_active_job: true,
     completed_status: recoveredJob.job.status,
