@@ -28,7 +28,7 @@ function response(statusCode: number, body = "", headers: Record<string, string>
 test("OpenAI 图片兼容请求支持 base64、固定合同和绑定 IP 的 URL 下载", async () => {
   let requestBody: Record<string, unknown> | undefined;
   const base64 = await generateOpenAiImage({
-    prompt: "  竖屏人物图  ", config, lookupImpl: publicLookup,
+    prompt: "  竖屏人物图  ", negativePrompt: "  文字，水印  ", config, lookupImpl: publicLookup,
     fetchImpl: (async (input, init) => {
       assert.equal(String(input), "https://api.example/v1/images/generations");
       assert.equal(init?.redirect, "error");
@@ -41,7 +41,7 @@ test("OpenAI 图片兼容请求支持 base64、固定合同和绑定 IP 的 URL 
     }) as typeof fetch,
   });
   assert.deepEqual(requestBody, {
-    model: "image-model", prompt: "竖屏人物图", size: IMAGE_GENERATION_SIZE,
+    model: "image-model", prompt: "竖屏人物图\n\n【严格禁止】画面中不得出现以下内容：文字，水印", size: IMAGE_GENERATION_SIZE,
     watermark: false, response_format: "url",
   });
   assert.equal(Buffer.from(base64.bytes).toString(), "image");

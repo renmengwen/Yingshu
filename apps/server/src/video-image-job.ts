@@ -96,7 +96,7 @@ export function createVideoImageJobHandler(
       let generated: Awaited<ReturnType<typeof generate>> | undefined;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          generated = await generate({ prompt: task.prompt, config, signal: controller.signal });
+          generated = await generate({ prompt: task.prompt, negativePrompt: task.negativePrompt, config, signal: controller.signal });
           break;
         } catch (error) {
           if (controller.signal.aborted || context.isCancellationRequested()) throw new JobCancelledError();

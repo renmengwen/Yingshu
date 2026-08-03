@@ -35,6 +35,7 @@ export type BoundHttpRequest = (
 
 export interface GenerateImageInput {
   prompt: string;
+  negativePrompt?: string;
   config: OpenAiImageConfig;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -198,7 +199,8 @@ function decodeBase64(value: string) {
 }
 
 export async function generateOpenAiImage(input: GenerateImageInput): Promise<GeneratedImage> {
-  const prompt = input.prompt.trim();
+  const negativePrompt = input.negativePrompt?.trim();
+  const prompt = `${input.prompt.trim()}${negativePrompt ? `\n\n【严格禁止】画面中不得出现以下内容：${negativePrompt}` : ""}`;
   const { baseUrl, apiKey, model } = input.config;
   if (!prompt || !baseUrl.trim() || !apiKey.trim() || !model.trim()) throw new Error("图片模型配置或提示词不完整");
   const fetchImpl = input.fetchImpl ?? fetch;

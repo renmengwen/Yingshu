@@ -66,7 +66,11 @@ test("Video 图片批次复用现有 Job 与真实媒体校验，并以 CAS 完�
     assert.equal(enqueueVideoImageBatch(value.connection.database, input).created, false);
     let calls = 0;
     const handler = createVideoImageJobHandler(value.connection.database, value.dataRoot, async () => imageConfig, {
-      generate: async () => { calls += 1; return { bytes: await readFile(fixturePath) }; },
+      generate: async (input) => {
+        assert.equal(input.negativePrompt, "watermark, text");
+        calls += 1;
+        return { bytes: await readFile(fixturePath) };
+      },
     });
     const worker = new JobWorker(value.connection.database, { [VIDEO_IMAGE_JOB_TYPE]: handler },
       { workerId: "images", leaseMs: 5000, heartbeatMs: 100 });
