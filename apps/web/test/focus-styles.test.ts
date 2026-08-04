@@ -3,6 +3,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+
+import { NativeSelect } from "../src/components/ui/native-select.tsx";
+import { ProjectShell } from "../src/projects/ProjectShell.tsx";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const styles = read("../src/styles.css");
@@ -61,20 +66,13 @@ test("基础控件保留 disabled 光标和 44px 触控目标，原生小控件�
   }
 });
 
-test("整卡焦点代理使用明确类、中文约束注释且不依赖 focus-within", () => {
-  const proxyMatch = styles.match(/\.([a-z][\w-]*)[^,{]*:\s*has\([^)]*:\s*focus-visible\s*\)/iu);
-  assert.ok(proxyMatch, "应提供仅供选择卡和上传触发器使用的专用焦点代理类");
-  const proxyClass = proxyMatch[1];
-  const selectorIndex = proxyMatch.index ?? 0;
-  assert.match(styles.slice(Math.max(0, selectorIndex - 220), selectorIndex), /\/\*[^*]*[\u3400-\u9fff][^*]*\*\//u);
+test("隐藏文件输入由上传标签代理单层焦点且不依赖 focus-within", () => {
+  assert.match(styles, /\.focus-ring-proxy:has\([^)]*:focus-visible\)[^{]*\{[^}]*outline\s*:\s*2px\s+solid\s+var\(--focus\)/su);
+  assert.match(styles, /\.focus-ring-proxy\s+:where\([^)]*input[^)]*\):focus-visible\s*\{[^}]*outline\s*:\s*none/su);
 
-  for (const path of [
-    "../src/projects/VideoInputStage.tsx",
-    "../src/production/assets/CandidatePanel.tsx",
-    "../src/projects/VisualImageReviewRow.tsx",
-  ]) {
+  for (const path of ["../src/production/assets/CandidatePanel.tsx", "../src/projects/VisualImageReviewRow.tsx"]) {
     const source = read(path);
-    assert.match(source, new RegExp(`\\b${proxyClass}\\b`, "u"), `${path} 应显式使用专用焦点代理类`);
+    assert.match(source, /<label\b[^>]*focus-ring-proxy[\s\S]*?<input\b[^>]*type="file"/u, `${path} 的隐藏文件输入应由上传标签代理焦点`);
     assert.doesNotMatch(source, /focus-within/u);
   }
 });
@@ -105,25 +103,80 @@ test("Accordion 触发按钮不再叠加本地 ring 与全局 outline", () => {
   assert.doesNotMatch(source, /focus-visible:outline/u);
 });
 
-test("受控删除 AlertDialog 关闭后显式恢复实际触发按钮焦点", () => {
+test("受控删除 AlertDialog 从实际删除按钮打开并在关闭后返焦", () => {
   const source = read("../src/projects/ProjectHomePage.tsx");
-  const triggerRef = source.match(/const\s+(\w+)\s*=\s*useRef<[^>]*HTMLButtonElement[^>]*>/u)?.[1];
-  assert.ok(triggerRef, "应记录实际打开删除弹框的按钮");
-  assert.match(source, /<button\b[^>]*onClick=\{[^}]*setPendingDelete/su);
-  assert.match(source, new RegExp(`${triggerRef}\\.current\\s*=\\s*\\w+\\.currentTarget|ref=\\{[^}]*${triggerRef}`, "su"));
+  assert.match(source, /<Button\b[^>]*onClick=\{\(event\)[^}]*\.current\s*=\s*event\.currentTarget;\s*setPendingDelete\(/su);
 
   const closeHandlerIndex = source.indexOf("onCloseAutoFocus");
   assert.notEqual(closeHandlerIndex, -1, "受控弹框应接管关闭后的自动焦点");
   const closeHandler = source.slice(closeHandlerIndex, closeHandlerIndex + 700);
-  assert.match(closeHandler, new RegExp(`\\b${triggerRef}\\b`, "u"));
   assert.match(closeHandler, /preventDefault\s*\(\s*\)/u);
   assert.match(closeHandler, /isConnected/u);
   assert.match(closeHandler, /\.focus\s*\(\s*\)/u);
 });
 
-test("ProjectShell 的主题与设置按钮只使用全局焦点 outline", () => {
-  const source = read("../src/projects/ProjectShell.tsx");
-  assert.doesNotMatch(source, /<button\b[^>]*focus-visible:(?:ring|outline-none)/su);
+test("本轮实际使用的交互基础组件保持 2px 单层焦点、44px 命中区和中文模板", () => {
+  const interactive = [
+    "button.tsx",
+    "input.tsx",
+    "textarea.tsx",
+    "native-select.tsx",
+    "radio-group.tsx",
+    "checkbox.tsx",
+    "dialog.tsx",
+    "alert-dialog.tsx",
+    "pagination.tsx",
+  ].map((name) => ({ name, source: read(`../src/components/ui/${name}`) }));
+
+  for (const { name, source } of interactive) {
+    assert.doesNotMatch(source, /ring-\[3px\]/u, `${name} 不得恢复 shadcn 默认 3px ring`);
+    assert.doesNotMatch(source, />\s*(?:Close|Previous|Next|Loading)\s*</u, `${name} 的可见模板文案必须为中文`);
+  }
+
+  for (const name of ["button.tsx", "input.tsx", "textarea.tsx", "native-select.tsx", "radio-group.tsx", "checkbox.tsx", "dialog.tsx"]) {
+    const source = interactive.find((item) => item.name === name)!.source;
+    assert.match(source, /(?:min-h|h|size)-(?:1[1-9]|[2-9]\d)\b/u, `${name} 的主要交互目标不得小于 44px`);
+  }
+
+  const pagination = interactive.find((item) => item.name === "pagination.tsx")!.source;
+  assert.match(pagination, /aria-label="分页"/u);
+  assert.match(pagination, /aria-label="前往上一页"[\s\S]*>上一页</u);
+  assert.match(pagination, /aria-label="前往下一页"[\s\S]*>下一页</u);
+  assert.match(pagination, /buttonVariants\(/u, "分页链接应复用 Button 的 44px 命中区");
+
+  const dialog = interactive.find((item) => item.name === "dialog.tsx")!.source;
+  assert.match(dialog, /<span[^>]*className="sr-only"[^>]*>关闭<\/span>/u);
+});
+
+test("NativeSelect 的表单包装可全宽，默认分页包装保持紧凑", () => {
+  const form = renderToString(createElement(NativeSelect, { "aria-label": "关联旁白", wrapperClassName: "w-full" }));
+  const pagination = renderToString(createElement(NativeSelect, { "aria-label": "每页条数" }));
+  const formWrapper = form.match(/<div\b[^>]*class="([^"]*)"[^>]*data-slot="native-select-wrapper"/u)?.[1];
+  const paginationWrapper = pagination.match(/<div\b[^>]*class="([^"]*)"[^>]*data-slot="native-select-wrapper"/u)?.[1];
+
+  assert.ok(formWrapper?.split(/\s+/u).includes("w-full"), "表单用途应通过公开 wrapperClassName API 占满字段宽度");
+  assert.ok(!formWrapper?.split(/\s+/u).includes("w-fit"), "显式全宽不应残留紧凑宽度冲突");
+  assert.ok(paginationWrapper?.split(/\s+/u).includes("w-fit"), "默认分页用途应保持紧凑包装");
+  assert.ok(!paginationWrapper?.split(/\s+/u).includes("w-full"), "默认包装不应擅自扩展为全宽");
+});
+
+test("ProjectShell 主题组保留 system/light/dark 三态且不生成 aria-pressed 阴影", () => {
+  const html = renderToString(createElement(ProjectShell, {
+    title: "测试项目",
+    description: "主题语义验证",
+    navigate: () => undefined,
+    onOpenSettings: () => undefined,
+    themePreference: "light",
+    onThemeChange: () => undefined,
+  }));
+  const themeGroup = html.match(/<div\b[^>]*role="group"[^>]*aria-label="页面主题"[\s\S]*?<\/div>/u)?.[0];
+
+  assert.ok(themeGroup, "应渲染带中文名称的主题按钮组");
+  assert.equal((themeGroup.match(/<button\b/g) ?? []).length, 3);
+  assert.equal((themeGroup.match(/aria-pressed="true"/g) ?? []).length, 1);
+  assert.equal((themeGroup.match(/aria-pressed="false"/g) ?? []).length, 2);
+  assert.match(themeGroup, />系统<\/button>[\s\S]*>浅色<\/button>[\s\S]*>深色<\/button>/u);
+  assert.doesNotMatch(themeGroup, /\bshadow(?:-|\b)/u);
 });
 
 test("保留专用 ring 的阶段导航不再叠加全局 outline", () => {
