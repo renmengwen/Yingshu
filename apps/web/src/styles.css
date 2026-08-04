@@ -38,6 +38,7 @@
   --muted-foreground: var(--fg-muted);
   --accent-foreground: var(--accent-hover);
   --destructive: var(--status-danger);
+  --destructive-foreground: var(--fg-inverse);
   --border: var(--border-subtle);
   --input: var(--border-strong);
   --ring: var(--focus-ring);
@@ -160,6 +161,7 @@ body { margin: 0; min-width: 0; min-height: 100vh; }
   --color-accent: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
