@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { Alert, AlertDescription } from "../components/ui/alert";
+import { Button } from "../components/ui/button";
 import { canCancelPlanJob, newVisual, planJobLabel, validateScriptDraft, validateVisualDrafts, videoPlanStageLabel } from "./plan-logic";
 import type { VideoScriptParagraph, VideoVisualDraft } from "./types";
 import type { useVideoPlan } from "./use-video-plan";
@@ -7,8 +9,6 @@ import { isPlanIncompatible, isScriptDirty, isVisualDirty, planReviewGates, sync
 import { NarrationReview } from "./video-plan-review/NarrationReview";
 import { PlanActionBar, PlanOverview, SourcesRisksDialog } from "./video-plan-review/PlanReviewSupport";
 import { VisualReview } from "./video-plan-review/VisualReview";
-
-const secondaryButton = "min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm font-semibold hover:bg-[var(--bg-subtle)] disabled:cursor-not-allowed disabled:opacity-50";
 
 export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVideoPlan> }) {
   const [title, setTitle] = useState("");
@@ -82,15 +82,15 @@ export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVi
       <p className="font-mono text-[11px] text-[var(--accent)]">阶段 02</p>
       <h2 id="plan-stage-heading" className="mt-2 text-xl font-semibold">文案与画面方案</h2>
       <p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">方案只用于审核。本阶段不会生成图片、TTS、字幕或 MP4。</p>
-      <div className={`mt-5 min-h-11 border px-3 py-3 text-sm ${state.actionState === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]" : "border-[var(--border-subtle)] bg-[var(--bg-subtle)] text-[var(--fg-secondary)]"}`} role={state.actionState === "error" ? "alert" : "status"} aria-live={state.actionState === "error" ? undefined : "polite"}>{state.status}</div>
-      {validationError ? <p className="mt-3 border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-3 text-sm text-[var(--danger)]" role="alert">{validationError}。请修正后重试。</p> : null}
+      <Alert className="mt-5" variant={state.actionState === "error" ? "destructive" : "default"} role={state.actionState === "error" ? "alert" : "status"} aria-live={state.actionState === "error" ? undefined : "polite"}><AlertDescription>{state.status}</AlertDescription></Alert>
+      {validationError ? <Alert className="mt-3" variant="destructive"><AlertDescription>{validationError}。请修正后重试。</AlertDescription></Alert> : null}
 
       {state.job && !plan ? <section className="mt-6 border-y border-[var(--border-subtle)] py-5" aria-labelledby="plan-job-heading">
         <h3 id="plan-job-heading" className="text-base font-semibold">方案任务</h3>
         <p className="mt-2 font-semibold">{videoPlanStageLabel(state.videoStatus)}</p>
         <p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">{planJobLabel(state.job)}</p>
         <p className="mt-2 font-mono text-xs text-[var(--fg-tertiary)]">任务 {state.job.id}</p>
-        {canCancelPlanJob(state.job) ? <button className={`${secondaryButton} mt-4`} type="button" disabled={state.busy} onClick={() => void state.cancel()}>{state.busy ? "正在处理中…" : "中断生成"}</button> : null}
+        {canCancelPlanJob(state.job) ? <Button className="mt-4" variant="outline" type="button" disabled={state.busy} onClick={() => void state.cancel()}>{state.busy ? "正在处理中…" : "中断生成"}</Button> : null}
       </section> : null}
 
       {!plan && state.loaded && !state.job ? <div className="mt-8 border-y border-[var(--border-subtle)] py-10 text-center"><p className="text-sm text-[var(--fg-secondary)]">尚无可审核方案。返回输入阶段保存草稿后创建任务。</p></div> : null}
@@ -103,7 +103,7 @@ export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVi
             <h3 className="text-base font-semibold">来源与风险</h3>
             <p className="mt-1 text-sm text-[var(--fg-secondary)]">{state.sources.length} 条冻结来源 · {plan.script.risks.length} 项待核对。</p>
           </div>
-          <button ref={sourcesTriggerRef} className={secondaryButton} type="button" onClick={() => setSourcesOpen(true)}>查看来源与风险详情</button>
+          <Button ref={sourcesTriggerRef} variant="outline" type="button" onClick={() => setSourcesOpen(true)}>查看来源与风险详情</Button>
         </div>
 
         <NarrationReview

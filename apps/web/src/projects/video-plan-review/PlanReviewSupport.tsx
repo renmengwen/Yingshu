@@ -1,5 +1,8 @@
 import { useRef, type RefObject } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -33,7 +36,7 @@ export function PlanOverview({ plan, sourceCount, incompatible }: PlanOverviewPr
         <h3 id="plan-overview-heading" className="text-base font-semibold">方案概览</h3>
         <p className="mt-1 text-sm text-[var(--fg-secondary)]">当前旁白与画面修订的审核摘要。</p>
       </div>
-      <span className="rounded border border-[var(--border-strong)] bg-[var(--surface-secondary)] px-2 py-1 text-xs font-semibold">{approvalLabel}</span>
+      <Badge variant="outline">{approvalLabel}</Badge>
     </div>
 
     <dl className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
@@ -45,7 +48,7 @@ export function PlanOverview({ plan, sourceCount, incompatible }: PlanOverviewPr
       <div><dt className="text-xs text-[var(--fg-muted)]">批准状态</dt><dd className="mt-1 font-semibold">{approvalLabel}</dd></div>
     </dl>
 
-    {plan.stale ? <p className="mt-5 bg-[var(--status-warning-soft)] px-3 py-3 text-sm text-[var(--status-warning)]" role="alert">输入快照已经变化，当前方案已失效。请重新生成方案。</p> : incompatible ? <p className="mt-5 bg-[var(--status-warning-soft)] px-3 py-3 text-sm text-[var(--status-warning)]" role="alert">画面方案尚未绑定当前旁白修订。请先保存兼容的画面修订。</p> : null}
+    {plan.stale ? <Alert className="mt-5 border-[var(--status-warning)] bg-[var(--status-warning-soft)] text-[var(--status-warning)]"><AlertDescription className="text-current">输入快照已经变化，当前方案已失效。请重新生成方案。</AlertDescription></Alert> : incompatible ? <Alert className="mt-5 border-[var(--status-warning)] bg-[var(--status-warning-soft)] text-[var(--status-warning)]"><AlertDescription className="text-current">画面方案尚未绑定当前旁白修订。请先保存兼容的画面修订。</AlertDescription></Alert> : null}
   </section>;
 }
 
@@ -104,7 +107,7 @@ export function SourcesRisksDialog({
       </section>
     </div>
 
-    <DialogFooter><DialogClose ref={closeRef}>关闭详情</DialogClose></DialogFooter>
+    <DialogFooter><DialogClose asChild><Button ref={closeRef} variant="outline">关闭详情</Button></DialogClose></DialogFooter>
     </DialogContent>
   </Dialog>;
 }
@@ -142,27 +145,24 @@ export function PlanActionBar({
             ? { label: `${gates.unsavedCount} 组修改未保存`, reason: gates.approve.reason }
             : { label: "可以批准", reason: "批准只绑定当前方案，不会启动后续生产。" };
 
-  const secondaryButton = "min-h-11 rounded border border-[var(--border-strong)] bg-[var(--surface-primary)] px-4 text-sm font-semibold text-[var(--fg-primary)] hover:bg-[var(--surface-secondary)] disabled:cursor-not-allowed disabled:opacity-50";
-  const primaryButton = "min-h-11 rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-4 text-sm font-semibold text-[var(--fg-inverse)] hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50";
-
   return <aside className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[1440px] border border-[var(--border-strong)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-popover)] sm:bottom-3 sm:w-[calc(100%-2rem)] sm:rounded-lg sm:p-4" aria-label="方案保存与批准">
     <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="min-w-0">
-        <p className="text-sm font-semibold">{status.label}</p>
-        <p className="mt-1 text-xs leading-5 text-[var(--fg-secondary)]" role={stale || incompatible ? "alert" : undefined}>{status.reason}</p>
-      </div>
+      <Alert className="min-w-0 border-0 bg-transparent p-0" role={stale || incompatible ? "alert" : "status"} aria-live={stale || incompatible ? undefined : "polite"}>
+        <AlertTitle>{status.label}</AlertTitle>
+        <AlertDescription className="text-xs leading-5">{status.reason}</AlertDescription>
+      </Alert>
       <div className="grid min-w-0 shrink-0 gap-2 sm:grid-cols-3">
         <div className="grid min-w-0 content-start gap-1">
-          <button className={secondaryButton} type="button" disabled={!gates.saveScript.allowed} onClick={() => void onSaveScript()}>{busy ? "处理中…" : "保存旁白修订"}</button>
-          {!gates.saveScript.allowed && !busy ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.saveScript.reason}</p> : null}
+          <Button variant="outline" type="button" disabled={!gates.saveScript.allowed} onClick={() => void onSaveScript()}>{busy ? "处理中…" : "保存旁白修订"}</Button>
+          {!gates.saveScript.allowed ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.saveScript.reason}</p> : null}
         </div>
         <div className="grid min-w-0 content-start gap-1">
-          <button className={secondaryButton} type="button" disabled={!gates.saveVisual.allowed} onClick={() => void onSaveVisuals()}>{busy ? "处理中…" : incompatible ? "保存兼容画面修订" : "保存画面修订"}</button>
-          {!gates.saveVisual.allowed && !busy ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.saveVisual.reason}</p> : null}
+          <Button variant="outline" type="button" disabled={!gates.saveVisual.allowed} onClick={() => void onSaveVisuals()}>{busy ? "处理中…" : incompatible ? "保存兼容画面修订" : "保存画面修订"}</Button>
+          {!gates.saveVisual.allowed ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.saveVisual.reason}</p> : null}
         </div>
         <div className="grid min-w-0 content-start gap-1">
-          <button className={primaryButton} type="button" disabled={!gates.approve.allowed} onClick={() => void onApprove()}>{busy ? "处理中…" : approved ? "当前方案已批准" : "批准当前方案"}</button>
-          {!gates.approve.allowed && !busy ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.approve.reason}</p> : null}
+          <Button type="button" disabled={!gates.approve.allowed} onClick={() => void onApprove()}>{busy ? "处理中…" : approved ? "当前方案已批准" : "批准当前方案"}</Button>
+          {!gates.approve.allowed ? <p className="max-w-52 text-xs leading-5 text-[var(--fg-muted)]">{gates.approve.reason}</p> : null}
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../components/ui/alert-dialog";
+import { Button } from "../components/ui/button";
 import { CreateForm } from "./CreateForm";
 import { formatUpdatedAt, projectPath } from "./logic";
 import { ProjectShell, StatusStrip } from "./ProjectShell";
@@ -20,7 +21,7 @@ export function ProjectHomePage(props: PageCommonProps) {
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3"><h2 id="projects-heading" className="text-base font-semibold">项目列表</h2><span className="font-mono text-xs text-[var(--fg-tertiary)]">{state.items?.length ?? 0}</span></div>
       {!state.loaded ? <p className="py-10 text-sm text-[var(--fg-secondary)]" role="status">正在读取项目数据…</p> : failed ? <p className="py-10 text-sm text-[var(--danger)]">项目暂时无法显示。请刷新页面重试。</p> : state.items?.length ? <div className="divide-y divide-[var(--border-subtle)]">{state.items.map((project) => <article className="flex flex-col gap-4 py-5 md:flex-row md:items-center md:justify-between" key={project.id}>
         <div className="min-w-0"><h3 className="truncate text-base font-semibold" title={project.name}>{project.name}</h3><p className="mt-2 font-mono text-xs text-[var(--fg-tertiary)]">{project.videoCount}个视频 · {formatUpdatedAt(project.updatedAt)}</p></div>
-        <div className="flex gap-2"><button className="min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm font-semibold hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={() => props.navigate(projectPath(project.id))}>打开项目</button><button className="min-h-11 rounded border border-[var(--danger)] px-4 text-sm font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:opacity-50" type="button" disabled={state.busy} onClick={(event) => { deleteButtonRef.current = event.currentTarget; setPendingDelete(project); }}>删除</button></div>
+        <div className="flex gap-2"><Button variant="outline" type="button" onClick={() => props.navigate(projectPath(project.id))}>打开项目</Button><Button variant="outline" className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive" type="button" disabled={state.busy} onClick={(event) => { deleteButtonRef.current = event.currentTarget; setPendingDelete(project); }}>删除</Button></div>
       </article>)}</div> : <p className="py-10 text-sm text-[var(--fg-secondary)]">还没有项目。填写名称后创建第一个项目。</p>}
     </section>
     <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(undefined); }}><AlertDialogContent onCloseAutoFocus={(event) => {

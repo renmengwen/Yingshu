@@ -1,5 +1,8 @@
 import { useState } from "react";
 
+import { Button } from "../components/ui/button";
+import { Field, FieldError, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
 import { normalizeName } from "./logic";
 
 export function CreateForm({ kind, busy, onSubmit }: {
@@ -23,10 +26,11 @@ export function CreateForm({ kind, busy, onSubmit }: {
       setError((cause as Error).message);
     }
   }}>
-    <label className="grid gap-2 text-sm font-semibold">{label}
-      <input className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 font-normal" value={value} disabled={busy} aria-invalid={!!error} aria-describedby={error ? `${kind}-name-error` : undefined} onChange={(event) => setValue(event.target.value)} placeholder={kind === "项目" ? "例如：产品功能讲解" : "例如：3分钟介绍核心功能"} />
-      {error ? <span id={`${kind}-name-error`} className="font-normal text-[var(--danger)]" role="alert">{error}</span> : null}
-    </label>
-    <button className="min-h-11 self-end rounded bg-[var(--accent)] px-5 text-sm font-semibold text-[var(--accent-contrast)] hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50" type="submit" disabled={busy}>{busy ? `正在${action}…` : action}</button>
+    <Field data-invalid={!!error}>
+      <FieldLabel htmlFor={`${kind}-name`}>{label}</FieldLabel>
+      <Input id={`${kind}-name`} value={value} disabled={busy} aria-invalid={!!error} aria-describedby={error ? `${kind}-name-error` : undefined} onChange={(event) => setValue(event.target.value)} placeholder={kind === "项目" ? "例如：产品功能讲解" : "例如：3分钟介绍核心功能"} />
+      {error ? <FieldError id={`${kind}-name-error`}>{error}</FieldError> : null}
+    </Field>
+    <Button className="self-end" type="submit" disabled={busy}>{busy ? `正在${action}…` : action}</Button>
   </form>;
 }

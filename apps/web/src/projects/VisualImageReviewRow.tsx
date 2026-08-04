@@ -1,10 +1,10 @@
 import React from "react";
 
-import { buttonVariants } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { Button, buttonVariants } from "../components/ui/button";
 import { candidateIdentity, currentImageCandidates, formatImageCandidateTime, historicalImageCandidates, styleSnapshotLabel, type VideoImageCandidate, type VideoImageVisual } from "./image-logic";
 
 const secondaryButton = buttonVariants({ variant: "outline" });
-const primaryButton = buttonVariants({ variant: "default" });
 
 function Candidate({ candidate, candidateIndex, visual, disabled, approving, onApprove }: {
   candidate: VideoImageCandidate;
@@ -21,7 +21,7 @@ function Candidate({ candidate, candidateIndex, visual, disabled, approving, onA
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">{candidate.origin === "upload" ? "上传候选" : "生成候选"}</p>
-        <span className="rounded border border-[var(--border-strong)] px-2 py-0.5 text-xs">{candidate.approved ? "已批准" : candidate.currentCompatible ? "当前可用" : "历史 / 已失效"}</span>
+        <Badge variant={candidate.approved ? "default" : "outline"}>{candidate.approved ? "已批准" : candidate.currentCompatible ? "当前可用" : "历史 / 已失效"}</Badge>
       </div>
       <p className="break-words font-mono text-[11px] leading-5 text-[var(--fg-tertiary)]">{candidateIdentity(candidate)}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs leading-5 text-[var(--fg-secondary)]">
@@ -51,7 +51,7 @@ function Candidate({ candidate, candidateIndex, visual, disabled, approving, onA
           </dl>
         </div>
       </details>
-      {candidate.currentCompatible ? <button className={`${candidate.approved ? secondaryButton : primaryButton} w-full`} type="button" disabled={disabled || candidate.approved} onClick={() => onApprove(candidate.id)}>{candidate.approved ? "当前已批准" : approving ? "正在批准…" : "选择并批准"}</button> : <p className="text-xs leading-5 text-[var(--fg-tertiary)]">上游方案或提示词已经变化。此候选仅供历史查看，不能批准。</p>}
+      {candidate.currentCompatible ? <Button className="w-full" variant={candidate.approved ? "outline" : "default"} type="button" disabled={disabled || candidate.approved} onClick={() => onApprove(candidate.id)}>{candidate.approved ? "当前已批准" : approving ? "正在批准…" : "选择并批准"}</Button> : <p className="text-xs leading-5 text-[var(--fg-tertiary)]">上游方案或提示词已经变化。此候选仅供历史查看，不能批准。</p>}
     </div>
   </article>;
 }
@@ -77,16 +77,16 @@ export function VisualImageReviewRow({ visual, productionAllowed, busyAction, on
   return <article className="min-w-0 border-t border-[var(--border-subtle)] py-6 first:border-t-0" aria-labelledby={`visual-${visual.id}`}>
     <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
       <header className="min-w-0 px-5 lg:px-0">
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-mono text-[11px] font-semibold tracking-[.12em] text-[var(--accent)]">画面 {String(visual.order + 1).padStart(2, "0")}</p><span className="rounded border border-[var(--border-strong)] px-2 py-0.5 text-xs">{approved ? "图片已批准" : "等待批准"}</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-mono text-[11px] font-semibold tracking-[.12em] text-[var(--accent)]">画面 {String(visual.order + 1).padStart(2, "0")}</p><Badge variant={approved ? "default" : "outline"}>{approved ? "图片已批准" : "等待批准"}</Badge></div>
         <h3 id={`visual-${visual.id}`} className="mt-3 text-base font-semibold leading-7">{visual.description}</h3>
         <p className="mt-3 text-sm leading-6 text-[var(--fg-secondary)]"><span className="font-semibold text-[var(--fg-primary)]">旁白摘要：</span>{visual.narrationSummary}</p>
         <div className="mt-4 space-y-3 text-sm leading-6"><div><p className="font-semibold">Prompt</p><p className="mt-1 whitespace-pre-wrap break-words text-[var(--fg-secondary)]">{visual.prompt}</p></div>{visual.negativePrompt ? <div><p className="font-semibold">Negative prompt</p><p className="mt-1 whitespace-pre-wrap break-words text-[var(--fg-secondary)]">{visual.negativePrompt}</p></div> : null}</div>
         {generationLabel ? <p className="mt-4 text-sm font-semibold" role={visual.generationState?.status === "failed" ? "alert" : "status"}>{generationLabel}{visual.generationState?.errorSummary ? `：${visual.generationState.errorSummary}` : ""}</p> : null}
         <div className="mt-5 flex flex-wrap gap-2">
-          <button className={secondaryButton} type="button" disabled={!productionAllowed || busy || activeGeneration} onClick={() => onGenerate(current.length > 0)}>{generating ? "正在创建任务…" : activeGeneration ? generationLabel : current.length ? "重新生成" : visual.generationState?.status === "failed" ? "重试失败项" : "生成单张"}</button>
+          <Button variant="outline" type="button" disabled={!productionAllowed || busy || activeGeneration} onClick={() => onGenerate(current.length > 0)}>{generating ? "正在创建任务…" : activeGeneration ? generationLabel : current.length ? "重新生成" : visual.generationState?.status === "failed" ? "重试失败项" : "生成单张"}</Button>
           <label className={`focus-ring-proxy ${secondaryButton} ${!productionAllowed || busy ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
             {uploading ? "正在上传…" : "上传图片"}
-            <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={!productionAllowed || busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) onUpload(file); event.currentTarget.value = ""; }} />
+            <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={!productionAllowed || busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUpload(file); }} />
           </label>
         </div>
       </header>
