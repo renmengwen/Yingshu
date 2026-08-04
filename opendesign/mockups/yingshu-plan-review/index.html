@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>映述 · 文案与画面方案</title>
+  <link rel="stylesheet" href="../../design-systems/yingshu-product/tokens/colors_and_type.css" />
+  <link rel="stylesheet" href="../yingshu-shared.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <main class="workspace">
+      <header class="app-header">
+        <div>
+          <p class="brand">映述 / 视频工作区</p>
+          <div class="title-line"><h1>为什么城市需要海绵系统</h1><span class="badge warning">等待审核</span></div>
+          <p class="subtitle">城市更新科普 · 更新于 14:32</p>
+        </div>
+        <div class="header-actions">
+          <div class="theme-switch" aria-label="主题">
+            <button type="button" data-theme-value="light" aria-pressed="true">明色</button>
+            <button type="button" data-theme-value="dark" aria-pressed="false">暗色</button>
+          </div>
+          <button class="btn" type="button">返回项目</button>
+          <button class="btn" type="button">设置</button>
+        </div>
+      </header>
+
+      <nav class="stage-nav" aria-label="视频制作阶段">
+        <button class="stage" type="button"><small>01</small><strong>输入与来源</strong><span>已完成</span></button>
+        <button class="stage is-current" type="button" aria-current="step"><small>02</small><strong>文案与画面方案</strong><span>当前阶段</span></button>
+        <button class="stage" type="button" disabled><small>03</small><strong>配图</strong><span>需先批准方案</span></button>
+        <button class="stage" type="button" disabled><small>04</small><strong>配音</strong><span>尚未生成</span></button>
+        <button class="stage" type="button" disabled><small>05</small><strong>视觉时间轴</strong><span>尚未生成</span></button>
+        <button class="stage" type="button" disabled><small>06</small><strong>导出</strong><span>尚未生成</span></button>
+      </nav>
+      <div class="stage-status" role="status" aria-live="polite"><span class="status-mark warning"></span><span>方案已恢复。检测到 3 项未保存修改，当前批准门禁关闭。</span></div>
+
+      <div class="content">
+        <div class="content-inner">
+          <section class="stage-heading" aria-labelledby="stage-title">
+            <div><p class="stage-kicker">阶段 02 / 审核</p><h2 id="stage-title">文案与画面方案</h2><p class="stage-summary">在表格中扫描所有记录；完整旁白、Prompt、来源与高级参数在详情层查看和编辑。本阶段不会生成图片、配音或视频。</p></div>
+            <div class="button-row"><button class="btn" type="button" data-dialog-open="source-dialog">来源与风险</button><button class="btn" type="button">查看输入快照</button></div>
+          </section>
+
+          <dl class="metrics">
+            <div class="metric"><dt>旁白修订</dt><dd class="mono">R06</dd></div>
+            <div class="metric"><dt>画面修订</dt><dd class="mono">R04</dd></div>
+            <div class="metric"><dt>估算字数</dt><dd class="mono">1,246 字</dd></div>
+            <div class="metric"><dt>估算时长</dt><dd class="mono">约 92 秒</dd></div>
+            <div class="metric"><dt>联网来源</dt><dd>已保存 4 条</dd></div>
+            <div class="metric"><dt>当前状态</dt><dd><span class="badge warning">尚未批准</span></dd></div>
+          </dl>
+
+          <div class="blocker" role="alert"><p><strong>暂时无法批准</strong><br />旁白有 2 条未保存修改；画面有 1 条未保存修改。画面修订仍绑定旁白 R05，保存旁白后需重新检查兼容性。</p><button class="btn quiet" type="button">查看全部阻断项</button></div>
+
+          <div class="tabs" role="tablist" data-tabs>
+            <button class="tab" type="button" role="tab" aria-selected="true" data-tab="narration">旁白段落 <span class="mono">12</span></button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-tab="visuals">画面方案 <span class="mono">10</span></button>
+          </div>
+
+          <section class="table-section" data-tab-panel="narration" data-paginated>
+            <div class="table-toolbar"><div class="toolbar-copy"><h3>旁白段落</h3><p>2 条已修改 · 编辑后先应用到当前草稿，再统一保存为新修订。</p></div><div class="toolbar-actions"><label>每页 <select class="control" data-page-size aria-label="每页条数"><option value="10">10 条</option><option value="20">20 条</option></select></label><button class="btn" type="button">筛选：全部状态</button></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>段落</th><th>旁白摘要</th><th>字数</th><th>关联画面</th><th>状态</th><th class="actions-cell">操作</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">01</td><td class="summary-cell"><strong>一场暴雨，为什么有些街区很快恢复？</strong><p>同样的降雨量，在不同城市表面会形成完全不同的积水结果。</p></td><td class="mono">108</td><td class="mono">01–02</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">02</td><td class="summary-cell"><strong>城市表面改变了雨水原本的路径</strong><p>硬化路面让雨水无法就地渗透，只能快速涌向有限的排水口。</p></td><td class="mono">116</td><td class="mono">03</td><td><span class="badge warning">已修改</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">03</td><td class="summary-cell"><strong>海绵系统不是一块吸水材料</strong><p>它是一组分散在城市里的渗、滞、蓄、净、用、排设施。</p></td><td class="mono">121</td><td class="mono">04</td><td><span class="badge warning">已修改</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">04</td><td class="summary-cell"><strong>第一步是让雨水慢下来</strong><p>下凹绿地和透水铺装把瞬时径流分散到更长的时间里。</p></td><td class="mono">98</td><td class="mono">05</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">05</td><td class="summary-cell"><strong>第二步是在街区内部暂存</strong><p>雨水花园、调蓄池和地下设施承担不同规模的暂存任务。</p></td><td class="mono">104</td><td class="mono">06</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">06</td><td class="summary-cell"><strong>第三步是把可用的水留下</strong><p>经过过滤的雨水可以用于浇灌、清洗和补充景观水体。</p></td><td class="mono">96</td><td class="mono">07</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">07</td><td class="summary-cell"><strong>系统的价值在于组合，而不是单点</strong><p>只有道路、社区、公园和河道一起工作，才能形成连续网络。</p></td><td class="mono">110</td><td class="mono">08</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">08</td><td class="summary-cell"><strong>数据决定设施应该放在哪里</strong><p>地形、土壤、管网和历史积水点共同决定改造优先级。</p></td><td class="mono">103</td><td class="mono">09</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">09</td><td class="summary-cell"><strong>极端天气仍然需要传统排水兜底</strong><p>海绵设施降低峰值压力，但不会替代泵站、管网和应急调度。</p></td><td class="mono">119</td><td class="mono">10</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">10</td><td class="summary-cell"><strong>维护决定系统能否长期工作</strong><p>堵塞、植物退化和沉积物累积都需要进入日常巡检计划。</p></td><td class="mono">101</td><td class="mono">11</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">11</td><td class="summary-cell"><strong>居民看到的是更舒适的公共空间</strong><p>同一块设施既管理雨水，也改善步行、遮阴和生物多样性。</p></td><td class="mono">92</td><td class="mono">12</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                  <tr><td class="mono">12</td><td class="summary-cell"><strong>真正的韧性来自城市每一层共同响应</strong><p>从一块透水地面到一套应急系统，它们共同争取恢复时间。</p></td><td class="mono">78</td><td class="mono">13</td><td><span class="badge success">已保存</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="narration-dialog">查看与编辑</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="mobile-list" aria-label="旁白段落紧凑列表">
+              <article class="mobile-card"><div class="mobile-card-head"><strong class="mono">旁白 01</strong><span class="badge success">已保存</span></div><p>一场暴雨，为什么有些街区很快恢复？</p><button class="btn" type="button" data-dialog-open="narration-dialog">查看与编辑</button></article>
+              <article class="mobile-card"><div class="mobile-card-head"><strong class="mono">旁白 02</strong><span class="badge warning">已修改</span></div><p>城市表面改变了雨水原本的路径。</p><button class="btn" type="button" data-dialog-open="narration-dialog">查看与编辑</button></article>
+            </div>
+            <div class="pagination"><span data-page-count>共 12 条</span><div class="pagination-controls"><button class="page-button" type="button" data-page-prev>上一页</button><span class="mono" data-page-current>1 / 2</span><button class="page-button" type="button" data-page-next>下一页</button></div></div>
+          </section>
+
+          <section class="table-section" data-tab-panel="visuals" hidden>
+            <div class="table-toolbar"><div class="toolbar-copy"><h3>画面方案</h3><p>10 个画面 · 1 个修改尚未保存 · 当前绑定旁白 R05。</p></div><button class="btn" type="button">增加画面</button></div>
+            <div class="table-wrap"><table><thead><tr><th>画面</th><th>关联旁白</th><th>用途与描述</th><th>修订绑定</th><th>状态</th><th class="actions-cell">操作</th></tr></thead><tbody>
+              <tr><td class="mono">01</td><td class="mono">段落 01</td><td class="summary-cell"><strong>开场建立暴雨问题</strong><p>俯视现代街区，雨水沿硬化路面汇集。</p></td><td class="mono">旁白 R05</td><td><span class="badge danger">不兼容</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="visual-dialog">查看与编辑</button></td></tr>
+              <tr><td class="mono">02</td><td class="mono">段落 01</td><td class="summary-cell"><strong>对比积水恢复速度</strong><p>左右分屏展示两种城市表面。</p></td><td class="mono">旁白 R05</td><td><span class="badge warning">已修改</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="visual-dialog">查看与编辑</button></td></tr>
+              <tr><td class="mono">03</td><td class="mono">段落 02</td><td class="summary-cell"><strong>解释径流路径</strong><p>清晰的信息图展示雨水汇入排水口。</p></td><td class="mono">旁白 R05</td><td><span class="badge danger">不兼容</span></td><td class="actions-cell"><button class="btn quiet" type="button" data-dialog-open="visual-dialog">查看与编辑</button></td></tr>
+            </tbody></table></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <aside class="sticky-bar" aria-label="阶段操作">
+    <div class="sticky-copy"><strong>3 项未保存 · 当前方案不可批准</strong><p>先保存旁白修订，再校验并保存画面修订。批准不会自动开始图片生成。</p></div>
+    <div class="button-row"><button class="btn" type="button" data-async data-loading="正在保存旁白…" data-success="旁白修订 R07 已保存。画面修订需要重新绑定。">保存旁白修订</button><button class="btn" type="button" disabled title="画面修订不兼容且存在未保存修改">保存画面修订</button><button class="btn primary" type="button" disabled title="请先处理未保存修改和不兼容绑定">批准当前方案</button></div>
+  </aside>
+
+  <div class="dialog-backdrop" id="narration-dialog" role="dialog" aria-modal="true" aria-labelledby="narration-title" hidden>
+    <section class="dialog">
+      <header class="dialog-header"><div class="dialog-title"><h3 id="narration-title">旁白段落 02</h3><p><span class="mono">paragraph_02</span> · 关联画面 03 · 当前草稿</p></div><button class="dialog-close" type="button" aria-label="关闭" data-dialog-close>×</button></header>
+      <div class="dialog-body">
+        <div class="field"><label for="narration-text">完整旁白文本</label><textarea class="control" id="narration-text" autofocus>城市表面改变了雨水原本的路径。硬化路面让雨水无法就地渗透，只能快速涌向有限的排水口。</textarea><small>当前 52 字 · 建议 45–130 字</small></div>
+        <div class="field-grid" style="margin-top:18px"><div class="field"><label for="stable-id">稳定段落 ID</label><input class="control mono" id="stable-id" value="paragraph_02" disabled /></div><div class="field"><span class="field-label">关联画面</span><div><span class="badge info">画面 03</span></div></div></div>
+        <div class="unsaved-warning" data-unsaved-warning hidden><strong>有未应用的修改</strong><p>关闭将丢弃本次编辑。你也可以返回继续编辑。</p><button class="btn danger" type="button" data-dialog-discard>放弃修改并关闭</button></div>
+      </div>
+      <footer class="dialog-footer"><div class="button-row"><button class="btn" type="button">上一条</button><button class="btn" type="button">下一条</button></div><div class="button-row"><button class="btn" type="button" data-dialog-close>取消</button><button class="btn primary" type="button" data-apply-dialog data-message="旁白段落 02 已应用到当前草稿，尚未创建新修订。">应用到当前草稿</button></div></footer>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop" id="visual-dialog" role="dialog" aria-modal="true" aria-labelledby="visual-title" hidden>
+    <section class="dialog wide"><header class="dialog-header"><div class="dialog-title"><h3 id="visual-title">画面 02 · 对比积水恢复速度</h3><p><span class="mono">visual_02</span> · 关联旁白段落 01 · 尚未生成</p></div><button class="dialog-close" type="button" aria-label="关闭" data-dialog-close>×</button></header>
+      <div class="dialog-body"><div class="field-grid"><div class="field"><label for="purpose">画面用途</label><input class="control" id="purpose" value="对比两种街区的积水恢复速度" autofocus /></div><div class="field"><label for="paragraph">关联旁白</label><select class="control" id="paragraph"><option>段落 01</option><option>段落 02</option></select></div></div><div class="field" style="margin-top:18px"><label for="description">中文画面描述</label><textarea class="control" id="description">同一场暴雨后的左右分屏：左侧硬化街区仍有明显积水，右侧海绵街区的雨水被绿地和透水铺装分散吸收。</textarea></div><div class="field" style="margin-top:18px"><label for="prompt">最终生图 Prompt</label><textarea class="control mono" id="prompt">Documentary urban planning visualization, split-screen comparison after heavy rain...</textarea></div><div class="field" style="margin-top:18px"><label for="negative">负面 Prompt</label><textarea class="control mono" id="negative">readable text, watermark, logo, distorted buildings, exaggerated flooding</textarea></div><div class="unsaved-warning" data-unsaved-warning hidden><strong>有未应用的修改</strong><p>关闭将丢弃本次画面编辑。你也可以返回继续编辑。</p><button class="btn danger" type="button" data-dialog-discard>放弃修改并关闭</button></div></div>
+      <footer class="dialog-footer"><button class="btn danger" type="button">删除画面</button><div class="button-row"><button class="btn" type="button" data-dialog-close>取消</button><button class="btn primary" type="button" data-apply-dialog data-message="画面 02 已应用到当前草稿，尚未保存。">应用到当前草稿</button></div></footer></section>
+  </div>
+
+  <div class="dialog-backdrop" id="source-dialog" role="dialog" aria-modal="true" aria-labelledby="source-title" hidden><section class="dialog"><header class="dialog-header"><div class="dialog-title"><h3 id="source-title">来源与风险</h3><p>当前方案 · 4 条冻结来源 · 2 项待核对</p></div><button class="dialog-close" type="button" aria-label="关闭" data-dialog-close>×</button></header><div class="dialog-body"><h3>冻结来源</h3><p class="subtitle">住建部：海绵城市建设技术指南 · 检索于 2026/8/4 13:48</p><p class="subtitle">中国气象局：城市暴雨风险资料 · 检索于 2026/8/4 13:49</p><h3 style="margin-top:24px">待核对项</h3><ul><li>不同城市的年径流总量控制率需以当地规划为准。</li><li>极端降雨场景不可暗示海绵设施能完全替代传统排水。</li></ul></div><footer class="dialog-footer"><span></span><button class="btn primary" type="button" data-dialog-close>完成查看</button></footer></section></div>
+  <div class="toast" role="status" aria-live="polite" data-toast hidden></div>
+  <script src="../yingshu-shared.js"></script>
+</body>
+</html>
