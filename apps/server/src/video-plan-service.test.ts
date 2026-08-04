@@ -74,6 +74,27 @@ function visualOutput(prompt: string) {
   })) };
 }
 
+test("默认空草稿不能绕过保存校验创建方案任务", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-empty-video-plan-"));
+  const connection = openDatabase(dataRoot);
+  const project = createProject(connection.database, { name: "空草稿项目" }, 10);
+  const video = createVideo(connection.database, project.id, { title: "空草稿视频" }, 20);
+  try {
+    assert.throws(() => enqueueVideoPlanJob(connection.database, {
+      projectId: project.id, videoId: video.id, idempotencyKey: "empty-draft", config,
+    }), /请输入主题后再保存草稿/);
+    assert.equal((connection.database.prepare("SELECT COUNT(*) AS count FROM video_plan_snapshots")
+      .get() as { count: number }).count, 0);
+    assert.equal((connection.database.prepare("SELECT COUNT(*) AS count FROM video_plan_jobs")
+      .get() as { count: number }).count, 0);
+    assert.equal((connection.database.prepare("SELECT COUNT(*) AS count FROM jobs")
+      .get() as { count: number }).count, 0);
+  } finally {
+    connection.close();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("开启联网时冻结搜索来源、只搜索一次并把来源交给旁白模型", async () => {
   const value = await fixture(true);
   let searchCalls = 0;

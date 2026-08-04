@@ -9,7 +9,12 @@ import { normalizeName, parseAppRoute, projectPath, videoPath } from "../src/pro
 import { canCancelPlanJob, narrationFromParagraphs, planJobLabel, validateScriptDraft, validateVisualDrafts, videoPlanStageLabel } from "../src/projects/plan-logic.ts";
 import type { VideoInputDraft } from "../src/projects/types.ts";
 import { VideoInputContent } from "../src/projects/VideoInputStage.tsx";
-import { VideoPlanLauncher } from "../src/projects/VideoPlanLauncher.tsx";
+import {
+  VideoPlanLauncher, videoPlanLaunchBlockReason, videoPlanLaunchConfirmation,
+} from "../src/projects/VideoPlanLauncher.tsx";
+import {
+  instructionLimitMessage, promptInstructionsStatus,
+} from "../src/projects/VideoPromptInstructionsDialog.tsx";
 import { VideoStageNavigation } from "../src/projects/VideoStageNavigation.tsx";
 
 test("项目与视频路由可安全编码并从刷新地址恢复", () => {
@@ -77,34 +82,59 @@ test("创作输入拒绝无效枚举、时长、必填和UTF-8字节超限", () 
   assert.throws(() => validateProjectSettings({ scriptInstructions: "映".repeat(20_001), visualInstructions: "" }), /20000个字符/);
 });
 
-test("提示词层级身份固定且输入表单呈现准确范围与空状态", () => {
+test("提示词层级身份固定且输入页呈现创作主次、可见操作与来源状态", () => {
   assert.deepEqual(promptLayerOrder("固定系统合同", "全局", "项目", "视频", "局部改写"), ["固定系统合同", "全局", "项目", "视频", "局部改写"]);
+  assert.equal(promptInstructionsStatus("文案要求", "画面要求"), "已设置：文案、画面");
+  assert.equal(promptInstructionsStatus("", ""), "未设置");
   const html = renderToString(createElement(VideoInputContent, { state: {
     draft: input(), setDraft: () => undefined, loaded: true, busy: false, dirty: true,
     status: "创作输入草稿已加载。", error: false, save: async () => undefined,
   } }));
-  assert.match(html, /输入主题/);
-  assert.match(html, /粘贴正文/);
-  assert.match(html, /仅参考表达方式/);
-  assert.match(html, /同时作为内容资料/);
-  assert.match(html, /1分钟/);
-  assert.match(html, /10分钟/);
-  assert.match(html, /9:16 · 1080×1920/);
-  assert.match(html, /尚未生成方案，暂无联网来源/);
-  assert.match(html, /保存不会创建任务或改变视频状态/);
-  assert.doesNotMatch(html, /provider|费用|书籍|章节|系列|分集/);
+  assert.match(html, /根据主题创作/);
+  assert.match(html, /根据正文改编/);
+  assert.match(html, /只参考表达风格/);
+  assert.match(html, /作为内容资料/);
+  assert.match(html, /1 分钟/);
+  assert.match(html, /10 分钟/);
+  assert.match(html, /竖屏 · 9:16/);
+  assert.match(html, /1080 × 1920/);
+  assert.match(html, /当前视频提示词补充/);
+  assert.match(html, /已设置：文案、画面/);
+  assert.match(html, /编辑提示词/);
+  assert.match(html, /尚未生成方案。生成时会检索并冻结可核验来源/);
+  assert.doesNotMatch(html, /<details|<summary|provider|费用|书籍|章节|系列|分集/);
 });
 
-test("生成确认明确模型、联网来源冻结、步骤与不会生成下游资产", () => {
+test("生成入口保持单一主操作并在输入可用时允许打开确认弹框", () => {
   const html = renderToString(createElement(VideoPlanLauncher, {
     input: input({ webEnabled: true }), dirty: false, busy: false,
     modelLabel: "本地 fixture / text-model", modelAvailable: true, onStart: () => undefined,
   }));
-  assert.match(html, /本地 fixture \/ text-model/);
-  assert.match(html, /资料准备 → 旁白 → 画面规划/);
-  assert.match(html, /只有获得可核验来源/);
-  assert.match(html, /不会自动生成图片、TTS、字幕或视频/);
+  assert.match(html, /生成文案与画面方案/);
+  assert.match(html, /aria-haspopup="dialog"/);
   assert.doesNotMatch(html, /disabled=""/);
+});
+
+test("生成入口统一阻止无效输入、未保存修改、处理中状态和缺失模型", () => {
+  assert.match(videoPlanLaunchBlockReason(input({ topic: "" }), false, false, true) ?? "", /请输入视频主题/);
+  assert.match(videoPlanLaunchBlockReason(input({ inputMode: "body", body: "" }), false, false, true) ?? "", /请粘贴视频正文/);
+  assert.match(videoPlanLaunchBlockReason(input(), true, false, true) ?? "", /先保存/);
+  assert.match(videoPlanLaunchBlockReason(input(), false, true, true) ?? "", /正在处理/);
+  assert.match(videoPlanLaunchBlockReason(input(), false, false, false) ?? "", /配置可用的文本模型/);
+  assert.equal(videoPlanLaunchBlockReason(input(), false, false, true), null);
+});
+
+test("生成确认摘要明确展示冻结配置、执行步骤和下游边界", () => {
+  const confirmation = videoPlanLaunchConfirmation(input({ webEnabled: true }), "本地 fixture / text-model");
+  assert.equal(confirmation.modelLabel, "本地 fixture / text-model");
+  assert.match(confirmation.web, /已开启/);
+  assert.equal(confirmation.steps, "资料准备 → 旁白 → 画面规划");
+  assert.match(confirmation.boundary, /不会自动生成图片、配音、字幕或视频/);
+});
+
+test("提示词补充在两万字边界内可应用，超限时给出明确删除字数", () => {
+  assert.equal(instructionLimitMessage("字".repeat(20_000)), null);
+  assert.match(instructionLimitMessage("字".repeat(20_001)) ?? "", /请删除 1 字/);
 });
 
 test("方案编辑校验稳定段落关系并只允许运行中任务取消", () => {

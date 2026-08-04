@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
+import { parseVideoInputDraft } from "./creative-input-contract.js";
 import { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
 import { createJob, getJob } from "./job-store.js";
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
@@ -33,7 +34,10 @@ export function enqueueVideoPlanJob(database: DatabaseSync, input: {
   getVideo(database, input.projectId, input.videoId);
   const idempotencyKey = planText(input.idempotencyKey, "幂等键", 200);
   if (!VIDEO_PLAN_ID.test(idempotencyKey)) throw new VideoPlanError(400, "幂等键只能包含字母、数字、下划线或连字符");
-  const draft = getVideoInput(database, input.projectId, input.videoId);
+  const storedDraft = getVideoInput(database, input.projectId, input.videoId);
+  const { updatedAt, ...editableDraft } = storedDraft;
+  // 任务入口重新校验数据库默认草稿，防止空主题或正文绕过保存接口直接触发联网和模型调用。
+  const draft = { ...parseVideoInputDraft(editableDraft), updatedAt };
   const model = createVideoPlanModelSnapshot(input.config);
   const prompts = {
     global: getGlobalPromptSettings(database), project: getProjectSettings(database, input.projectId),
