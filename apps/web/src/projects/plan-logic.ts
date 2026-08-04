@@ -30,10 +30,29 @@ export function narrationFromParagraphs(paragraphs: VideoScriptParagraph[]) {
   return paragraphs.map((paragraph) => paragraph.text.trim()).filter(Boolean).join("\n\n");
 }
 
+export function scriptMetadataFieldErrors(title: string, summary: string) {
+  return {
+    title: title.trim() ? null : "请输入标题建议",
+    summary: summary.trim() ? null : "请输入内容摘要",
+  };
+}
+
+export function paragraphTextFieldError(text: string) {
+  return text.trim() ? null : "旁白段落不能为空";
+}
+
+export function visualDraftFieldErrors(visual: Pick<VideoVisualDraft, "description" | "prompt">) {
+  return {
+    description: visual.description.trim() ? null : "画面描述不能为空",
+    prompt: visual.prompt.trim() ? null : "生图 prompt 不能为空",
+  };
+}
+
 export function validateScriptDraft(title: string, summary: string, paragraphs: VideoScriptParagraph[]) {
-  if (!title.trim()) throw new Error("请输入标题建议");
-  if (!summary.trim()) throw new Error("请输入内容摘要");
-  if (!paragraphs.length || paragraphs.some((paragraph) => !paragraph.text.trim())) throw new Error("旁白段落不能为空");
+  const metadataErrors = scriptMetadataFieldErrors(title, summary);
+  if (metadataErrors.title) throw new Error(metadataErrors.title);
+  if (metadataErrors.summary) throw new Error(metadataErrors.summary);
+  if (!paragraphs.length || paragraphs.some((paragraph) => paragraphTextFieldError(paragraph.text))) throw new Error("旁白段落不能为空");
   const ids = new Set(paragraphs.map((paragraph) => paragraph.id));
   if (ids.size !== paragraphs.length) throw new Error("旁白段落 ID 重复，请刷新后重试");
   return paragraphs.map((paragraph) => ({ ...paragraph, text: paragraph.text.trim() }));
@@ -47,7 +66,8 @@ export function validateVisualDrafts(visuals: VideoVisualDraft[], paragraphIds: 
     if (ids.has(visual.id)) throw new Error("画面 ID 重复，请刷新后重试");
     ids.add(visual.id);
     if (!allowed.has(visual.paragraphId)) throw new Error("画面关联的旁白段落已不存在");
-    if (!visual.description.trim() || !visual.prompt.trim()) throw new Error("画面描述和生图 prompt 不能为空");
+    const fieldErrors = visualDraftFieldErrors(visual);
+    if (fieldErrors.description || fieldErrors.prompt) throw new Error("画面描述和生图 prompt 不能为空");
     return { ...visual, description: visual.description.trim(), prompt: visual.prompt.trim() };
   });
 }
