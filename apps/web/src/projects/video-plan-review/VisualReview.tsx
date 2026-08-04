@@ -15,6 +15,7 @@ import { buttonVariants } from "../../components/ui/button";
 import {
   Dialog,
   DialogClose,
+  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -245,8 +246,8 @@ export function VisualReview({ visuals, paragraphs, busy, incompatible, onApplyV
       </div>
     </nav>
 
-    <Dialog open={Boolean(editingId && draft)} onOpenChange={requestClose} initialFocusRef={initialFocusRef} triggerRef={triggerRef}>
-      {draft ? <>
+    <Dialog open={Boolean(editingId && draft)} onOpenChange={requestClose}>
+      {draft ? <DialogContent showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); initialFocusRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus(); }}>
         <DialogHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="grid min-w-0 gap-2">
@@ -291,7 +292,7 @@ export function VisualReview({ visuals, paragraphs, busy, incompatible, onApplyV
           <DialogClose disabled={busy}>取消</DialogClose>
           <button type="button" className={buttonVariants()} disabled={busy || !dirty} onClick={applyDraft}>{busy ? "正在处理…" : "应用到当前草稿"}</button>
         </DialogFooter>
-      </> : null}
+      </DialogContent> : null}
     </Dialog>
   </section>;
 }

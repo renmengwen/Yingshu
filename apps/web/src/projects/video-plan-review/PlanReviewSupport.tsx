@@ -3,6 +3,7 @@ import { useRef, type RefObject } from "react";
 import {
   Dialog,
   DialogClose,
+  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -69,7 +70,8 @@ export function SourcesRisksDialog({
 }: SourcesRisksDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  return <Dialog open={open} onOpenChange={onOpenChange} initialFocusRef={closeRef} triggerRef={triggerRef}>
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); closeRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef?.current?.focus(); }}>
     <DialogHeader>
       <DialogTitle>来源与风险详情</DialogTitle>
       <DialogDescription>查看当前方案冻结的联网来源、资料摘要与待核对项。</DialogDescription>
@@ -103,6 +105,7 @@ export function SourcesRisksDialog({
     </div>
 
     <DialogFooter><DialogClose ref={closeRef}>关闭详情</DialogClose></DialogFooter>
+    </DialogContent>
   </Dialog>;
 }
 

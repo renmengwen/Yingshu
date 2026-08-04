@@ -2,7 +2,7 @@
 
 - `main` 只保存已验收的稳定版本；日常开发、验证和推送只在 `dev` 或从 `dev` 派生的短期功能分支进行。未经用户明确授权，不合并到 `main`。
 - 用户可见文案默认使用中文。
-- 前端使用 React、TypeScript、Vite、Tailwind CSS，并优先使用官方 `shadcn/ui` 组件。
+- 前端使用 React、TypeScript、Vite、Tailwind CSS；通用 UI 必须优先复用 `apps/web/src/components/ui/` 中已引入的官方 `shadcn/ui` 组件，不得重复造轮子。
 - 涉及前端 UI 调整时，必须调用 OpenDesign 技能参与。开始下一轮 UI 改造前先建立并加载 `opendesign/design-systems/yingshu-product`；`narralume-product` 只可作为迁移来源和反例参考，不得继续作为映述的目标视觉规范。
 - 后端使用 Fastify 和 TypeScript。
 - 用户离线、休息或暂时不回复时，不把等待确认作为停止条件；在既定产品方向和安全边界内自主决策并持续执行。只有缺少必须由用户提供的外部授权、需要显著改变产品方向、涉及不可逆或高风险外部操作、必须由用户作主观审美选择，或同一真实阻塞经充分排查仍无法解除时，才暂停并提问。
@@ -20,7 +20,7 @@
 ## 全栈模块化与样式硬约束
 
 - 前端样式以 Tailwind CSS utility 为第一选择；`styles.css` 只保留全局 token、reset/base、确有跨页面复用价值且 utility 无法清晰表达的少量规则。禁止继续用大段页面级手写 CSS 堆叠工作区、表单、资产卡、候选卡或响应式布局。
-- 简单按钮、输入框和布局使用原生语义元素加 Tailwind；Dialog、Select、Tabs、Toast、Popover 等复杂通用交互优先采用官方 `shadcn/ui` 源码及其最小依赖，不自造一套组件系统，也不为少量静态控件无条件引入整套依赖。
+- 开发通用交互前必须先检查 `apps/web/src/components/ui/` 和官方 `shadcn/ui` 注册表；已有组件必须直接复用，禁止自行实现或重复封装 Button、Input、Dialog、Select、Tabs、Toast、Popover、Table、Form 等同类基础组件。只有官方 `shadcn/ui` 没有对应能力且原生语义元素足以完整满足交互与可访问性时，才允许使用原生元素加 Tailwind；新增其他 UI 组件库必须由用户明确授权。
 - React 页面和工作区顶层组件只负责路由/恢复入口、领域状态组合和子组件编排。阶段导航、状态条、表单、资产树、Prompt Builder、候选审核、联系表等必须按独立变化原因拆成组件；数据读取/写入放在领域 hook 或 API client，纯组装/校验放在可单测纯函数，公共类型放在明确的领域类型模块。不得把 UI、请求、轮询、领域计算和大段布局同时塞进一个页面文件。
 - 后端入口只负责 Fastify 实例装配、插件注册和进程生命周期；新增业务路由按领域拆为 Fastify plugin/route 模块。请求 Schema/校验、领域 service、SQLite store、Job handler、provider adapter、文件/媒体工具和错误映射分别放在对应模块，禁止继续把完整业务流程堆进 `app.ts`、`server.ts` 或单个大 service 文件。
 - 前后端重复出现且语义稳定的类型、校验、状态归一化、哈希/身份、路径安全、轮询/取消和错误处理逻辑应抽取到公共模块；抽取后必须有明确调用边界和最小测试。不要复制粘贴相似实现，也不要为了追求文件数量机械拆分只有单一调用点、几行且没有独立领域含义的代码。

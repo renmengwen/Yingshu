@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   Dialog,
+  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -196,7 +197,8 @@ export function NarrationReview({
       </div>
     </nav>
 
-    <Dialog open={metadataOpen} onOpenChange={(open) => open ? setMetadataOpen(true) : closeMetadata()} initialFocusRef={metadataInitialFocusRef} triggerRef={metadataTriggerRef}>
+    <Dialog open={metadataOpen} onOpenChange={(open) => open ? setMetadataOpen(true) : closeMetadata()}>
+      <DialogContent showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); metadataInitialFocusRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); metadataTriggerRef.current?.focus(); }}>
       <DialogHeader>
         <div className="flex items-start justify-between gap-4">
           <div><DialogTitle>编辑旁白标题与摘要</DialogTitle><DialogDescription className="mt-2">修改方案级文案；应用后仍需在阶段操作栏保存旁白修订。</DialogDescription></div>
@@ -220,9 +222,11 @@ export function NarrationReview({
           }
         }}>应用到当前草稿</button>
       </DialogFooter>
+      </DialogContent>
     </Dialog>
 
-    <Dialog open={selectedParagraph !== null} onOpenChange={(open) => { if (!open) closeParagraph(); }} initialFocusRef={paragraphInitialFocusRef} triggerRef={paragraphTriggerRef}>
+    <Dialog open={selectedParagraph !== null} onOpenChange={(open) => { if (!open) closeParagraph(); }}>
+      <DialogContent showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); paragraphInitialFocusRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); paragraphTriggerRef.current?.focus(); }}>
       <DialogHeader>
         <div className="flex items-start justify-between gap-4">
           <div><DialogTitle>编辑{selectedIndex >= 0 ? recordLabel(selectedIndex) : "旁白段落"}</DialogTitle><DialogDescription className="mt-2">记录 {selectedParagraph?.id ?? ""} · 关联 {selectedParagraph ? visualCounts.get(selectedParagraph.id) ?? 0 : 0} 个画面。应用后仍需保存旁白修订。</DialogDescription></div>
@@ -245,6 +249,7 @@ export function NarrationReview({
           }
         }}>应用到当前草稿</button>
       </DialogFooter>
+      </DialogContent>
     </Dialog>
   </section>;
 }

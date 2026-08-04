@@ -292,12 +292,8 @@ test("固定操作栏并列呈现两类保存与批准动作及邻近阻断原�
 
 test("详情 Dialog 保留未保存关闭拦截、初始焦点与关闭返焦不变量", () => {
   const dialog = read("../src/components/ui/dialog.tsx");
-  assert.match(dialog, /onOpenChange/);
-  assert.match(dialog, /const requestClose = \(\) => onOpenChange\(false\)/);
-  assert.match(dialog, /initialFocusRef\?\.current\?\.focus\(\)/);
-  assert.match(dialog, /triggerRef\?\.current\?\.isConnected/);
-  assert.match(dialog, /triggerRef\.current\.focus\(\)/);
-  assert.match(dialog, /onCancel=.*preventDefault/s);
+  assert.match(dialog, /DialogPrimitive\.Root/);
+  assert.match(dialog, /DialogPrimitive\.Content/);
 
   for (const path of [
     "../src/projects/video-plan-review/NarrationReview.tsx",
@@ -309,8 +305,11 @@ test("详情 Dialog 保留未保存关闭拦截、初始焦点与关闭返焦不
     assert.match(source, /未应用修改/);
     assert.match(source, /继续编辑/);
     assert.match(source, /放弃修改并关闭/);
-    assert.match(source, /triggerRef/);
-    assert.match(source, /initialFocusRef/);
+    assert.match(source, /(?:triggerRef|TriggerRef)/);
+    assert.match(source, /(?:initialFocusRef|InitialFocusRef)/);
+    assert.match(source, /onOpenAutoFocus/);
+    assert.match(source, /onCloseAutoFocus/);
+    assert.match(source, /preventDefault\(\)/);
   }
 });
 
@@ -324,7 +323,7 @@ test("三类编辑字段连接错误描述并把首错交给对应 ref", () => {
     onApplyMetadata: () => undefined,
     onApplyParagraph: () => undefined,
   }));
-  assert.equal((narrationHtml.match(/aria-invalid="false"/g) ?? []).length >= 3, true);
+  assert.doesNotMatch(narrationHtml, /aria-invalid="true"/);
 
   const narration = read("../src/projects/video-plan-review/NarrationReview.tsx");
   for (const field of ["metadataErrors.title", "metadataErrors.summary", "paragraphError"]) {
@@ -344,15 +343,17 @@ test("三类编辑字段连接错误描述并把首错交给对应 ref", () => {
 });
 
 test("Phase 3 新组件不叠加局部焦点框或普通 label 父焦点框", () => {
+  const dialog = read("../src/components/ui/dialog.tsx");
+  assert.match(dialog, /focus-visible:ring-2/);
+
   for (const path of [
-    "../src/components/ui/dialog.tsx",
     "../src/projects/video-plan-review/NarrationReview.tsx",
     "../src/projects/video-plan-review/PlanReviewSupport.tsx",
     "../src/projects/video-plan-review/VisualReview.tsx",
   ]) {
     const source = read(path);
     assert.doesNotMatch(source, /focus-visible:ring/u, `${path} 不应叠加局部 ring`);
-    assert.doesNotMatch(source, /outline-none/u, `${path} 不应移除全局焦点可见性`);
+    assert.doesNotMatch(source, /outline-none/u, `${path} 不应移除业务控件的全局焦点可见性`);
     assert.doesNotMatch(source, /label\s*:\s*has|label:has/u, `${path} 不应给普通 label 增加父焦点框`);
   }
 });

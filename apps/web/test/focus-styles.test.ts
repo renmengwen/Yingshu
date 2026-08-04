@@ -156,8 +156,21 @@ test("Web 源码使用的 CSS token 均由映述设计系统或全局兼容层�
     }
   }
 
+  // shadcn 组件中的这些变量由 Radix/Base UI、组件内联样式或 Tailwind 运行时提供，不属于产品主题 token。
+  const runtimeComponentVariables = new Set([
+    "anchor-width",
+    "available-height",
+    "gap",
+    "radix-navigation-menu-viewport-height",
+    "radix-navigation-menu-viewport-width",
+    "radix-select-trigger-height",
+    "radix-select-trigger-width",
+    "sidebar-width",
+    "sidebar-width-icon",
+    "spacing",
+  ]);
   const undefinedTokens = [...usages]
-    .filter(([name]) => !definitions.has(name))
+    .filter(([name]) => !definitions.has(name) && !runtimeComponentVariables.has(name))
     .map(([name, files]) => `--${name} (${[...files].join(", ")})`)
     .sort();
   assert.deepEqual(undefinedTokens, []);

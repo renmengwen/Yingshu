@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "../../../opendesign/design-systems/yingshu-product/tokens/colors_and_type.css";
 
+@custom-variant dark (&:is(.dark *, [data-theme="dark"] *));
+
 :root,
 :root[data-theme="light"] {
   /* 旧生产组件仍消费这些名称；新页面直接使用 canonical token。 */
@@ -20,6 +22,39 @@
   --danger: var(--status-danger);
   --danger-soft: var(--status-danger-soft);
   --shadow: var(--shadow-raised);
+
+  /* shadcn/ui 语义色直接映射到映述设计令牌，避免出现第二套主题。 */
+  --background: var(--surface-canvas);
+  --foreground: var(--fg-primary);
+  --card: var(--surface-primary);
+  --card-foreground: var(--fg-primary);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--fg-primary);
+  --primary: var(--accent-primary);
+  --primary-foreground: var(--fg-inverse);
+  --secondary: var(--surface-secondary);
+  --secondary-foreground: var(--fg-primary);
+  --muted: var(--surface-inset);
+  --muted-foreground: var(--fg-muted);
+  --accent-foreground: var(--accent-hover);
+  --destructive: var(--status-danger);
+  --border: var(--border-subtle);
+  --input: var(--border-strong);
+  --ring: var(--focus-ring);
+  --chart-1: var(--signal-500);
+  --chart-2: var(--green-500);
+  --chart-3: var(--amber-500);
+  --chart-4: var(--red-500);
+  --chart-5: var(--neutral-500);
+  --radius: var(--radius-md);
+  --sidebar: var(--surface-secondary);
+  --sidebar-foreground: var(--fg-primary);
+  --sidebar-primary: var(--accent-primary);
+  --sidebar-primary-foreground: var(--fg-inverse);
+  --sidebar-accent: var(--accent-soft);
+  --sidebar-accent-foreground: var(--accent-hover);
+  --sidebar-border: var(--border-subtle);
+  --sidebar-ring: var(--focus-ring);
 }
 
 * { box-sizing: border-box; }
@@ -107,4 +142,38 @@ body { margin: 0; min-width: 0; min-height: 100vh; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
