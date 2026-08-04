@@ -1,9 +1,10 @@
 @import "tailwindcss";
-@import "../../../opendesign/design-systems/narralume-product/tokens/colors_and_type.css";
+@import "../../../opendesign/design-systems/yingshu-product/tokens/colors_and_type.css";
 
 :root,
 :root[data-theme="light"] {
   /* 旧生产组件仍消费这些名称；新页面直接使用 canonical token。 */
+  --font-reading: var(--font-sans);
   --bg-canvas: var(--surface-canvas);
   --bg-surface: var(--surface-primary);
   --bg-primary: var(--surface-primary);
@@ -15,6 +16,7 @@
   --accent-strong: var(--accent-hover);
   --accent-contrast: var(--fg-inverse);
   --focus: var(--focus-ring);
+  --warning: var(--status-warning);
   --danger: var(--status-danger);
   --danger-soft: var(--status-danger-soft);
   --shadow: var(--shadow-raised);
@@ -31,8 +33,17 @@
 }
 
 body { margin: 0; min-width: 0; min-height: 100vh; }
-button, input { font: inherit; }
-button:focus-visible, label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+:where(button, input, textarea, select) { font: inherit; }
+:where(button, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) { min-height: var(--control-height); }
+/* 显式声明局部 ring 的组件自行负责焦点，基础 outline 不得叠加。 */
+:where(button, input, textarea, select):where(:not([class*="focus-visible:ring"])):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+:where(button, input, textarea, select):disabled { cursor: not-allowed; }
+:where(input, textarea, select)[aria-invalid="true"] { border-color: var(--danger); }
+
+/* 仅供选择卡和隐藏文件输入代理焦点；普通 label 不得复用，避免父子控件双重描边。 */
+.focus-ring-proxy:has(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.focus-ring-proxy :where(input, textarea, select, button):focus-visible { outline: none; }
+.focus-ring-proxy:has(:disabled) { cursor: not-allowed; opacity: .5; }
 
 .workspace-shell { min-height: 100vh; padding: 28px; background: var(--bg-canvas); color: var(--fg-primary); transition: background-color 160ms ease, color 160ms ease; }
 .workspace-frame { width: min(1440px, 100%); min-height: calc(100vh - 56px); margin: 0 auto; border: 1px solid var(--border-subtle); background: var(--bg-surface); box-shadow: var(--shadow); }

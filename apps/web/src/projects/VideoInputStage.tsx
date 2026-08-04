@@ -3,8 +3,8 @@ import { useVideoInput } from "./use-video-input";
 import { VideoPlanLauncher } from "./VideoPlanLauncher";
 import type { useVideoPlan } from "./use-video-plan";
 
-const textareaClass = "mt-2 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-3 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:opacity-60";
-const choiceClass = "flex min-h-11 cursor-pointer items-center gap-3 rounded border border-[var(--border-subtle)] px-3 py-2 text-sm has-[:checked]:border-[var(--accent)] has-[:checked]:bg-[var(--accent-soft)] focus-within:ring-2 focus-within:ring-[var(--focus)]";
+const textareaClass = "mt-2 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-3 text-sm leading-6 disabled:opacity-60";
+const choiceClass = "focus-ring-proxy flex min-h-11 cursor-pointer items-center gap-3 rounded border border-[var(--border-subtle)] px-3 py-2 text-sm has-[:checked]:border-[var(--accent)] has-[:checked]:bg-[var(--accent-soft)]";
 
 export function VideoInputStage({ projectId, videoId, planState, onPlanStarted }: { projectId: string; videoId: string; planState: ReturnType<typeof useVideoPlan>; onPlanStarted: () => void }) {
   const state = useVideoInput(projectId, videoId);
@@ -81,7 +81,7 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
         </details>
 
         <section className="border-t border-[var(--border-subtle)] pt-6" aria-labelledby="sources-heading"><h3 id="sources-heading" className="text-base font-semibold">联网来源</h3><p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">{planState?.plan ? "来源已随当前方案冻结，请在“文案与画面方案”阶段查看。" : "尚未生成方案，暂无联网来源。"}</p></section>
-        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] pt-6"><button className="min-h-11 rounded bg-[var(--accent)] px-5 text-sm font-semibold text-[var(--accent-contrast)] hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-50" type="submit" disabled={state.busy || !state.dirty}>{state.busy ? "正在保存草稿…" : "保存草稿"}</button><span className="text-sm text-[var(--fg-tertiary)]">保存不会创建任务或改变视频状态。</span></div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] pt-6"><button className="min-h-11 rounded bg-[var(--accent)] px-5 text-sm font-semibold text-[var(--accent-contrast)] hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50" type="submit" disabled={state.busy || !state.dirty}>{state.busy ? "正在保存草稿…" : "保存草稿"}</button><span className="text-sm text-[var(--fg-tertiary)]">保存不会创建任务或改变视频状态。</span></div>
         {planState && state.draft && !planState.plan && (!planState.job || planState.job.status === "failed" || planState.job.status === "cancelled") ? <VideoPlanLauncher input={state.draft} dirty={state.dirty} busy={state.busy || planState.busy} modelLabel={planState.modelLabel} modelAvailable={planState.modelAvailable} onStart={() => { void planState.start(); onPlanStarted?.(); }} /> : null}
       </form> : state.loaded ? <div className="py-10"><p className="text-sm text-[var(--danger)]">创作输入暂不可用。请返回项目确认视频后重试。</p></div> : <p className="py-10 text-sm text-[var(--fg-secondary)]" role="status">正在读取创作输入草稿…</p>}
     </div>

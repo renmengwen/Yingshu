@@ -84,7 +84,7 @@ export function VisualImageReviewRow({ visual, productionAllowed, busyAction, on
         {generationLabel ? <p className="mt-4 text-sm font-semibold" role={visual.generationState?.status === "failed" ? "alert" : "status"}>{generationLabel}{visual.generationState?.errorSummary ? `：${visual.generationState.errorSummary}` : ""}</p> : null}
         <div className="mt-5 flex flex-wrap gap-2">
           <button className={secondaryButton} type="button" disabled={!productionAllowed || busy || activeGeneration} onClick={() => onGenerate(current.length > 0)}>{generating ? "正在创建任务…" : activeGeneration ? generationLabel : current.length ? "重新生成" : visual.generationState?.status === "failed" ? "重试失败项" : "生成单张"}</button>
-          <label className={`${secondaryButton} cursor-pointer ${!productionAllowed || busy ? "pointer-events-none opacity-50" : ""}`}>
+          <label className={`focus-ring-proxy ${secondaryButton} ${!productionAllowed || busy ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
             {uploading ? "正在上传…" : "上传图片"}
             <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={!productionAllowed || busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) onUpload(file); event.currentTarget.value = ""; }} />
           </label>

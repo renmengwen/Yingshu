@@ -15,9 +15,9 @@ export function ProjectShell({ title, description, children, onOpenSettings, the
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="flex min-h-11 items-center rounded border border-[var(--border-strong)] bg-[var(--bg-subtle)] p-0.5" role="group" aria-label="页面主题">
-            {(["system", "light", "dark"] as const).map((preference) => <button className="min-h-11 min-w-12 rounded-sm px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" key={preference} aria-pressed={themePreference === preference} onClick={() => onThemeChange(preference)}>{preference === "system" ? "系统" : preference === "light" ? "浅色" : "深色"}</button>)}
+            {(["system", "light", "dark"] as const).map((preference) => <button className="min-h-11 min-w-12 rounded-sm px-2 text-xs" type="button" key={preference} aria-pressed={themePreference === preference} onClick={() => onThemeChange(preference)}>{preference === "system" ? "系统" : preference === "light" ? "浅色" : "深色"}</button>)}
           </div>
-          <button className="min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm font-semibold hover:bg-[var(--bg-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={onOpenSettings}>设置</button>
+          <button className="min-h-11 rounded border border-[var(--border-strong)] px-4 text-sm font-semibold hover:bg-[var(--bg-subtle)]" type="button" onClick={onOpenSettings}>设置</button>
         </div>
       </header>
       {children}

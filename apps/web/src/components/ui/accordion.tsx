@@ -11,7 +11,7 @@ export function AccordionTrigger({ className, children, ...props }: React.Compon
     <AccordionPrimitive.Header className="flex">
       <AccordionPrimitive.Trigger
         className={cn(
-          "group flex min-h-11 flex-1 items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-semibold outline-none transition-colors hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus)] data-[state=open]:bg-[var(--bg-subtle)]",
+          "group flex min-h-11 flex-1 items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-semibold transition-colors hover:bg-[var(--bg-hover)] data-[state=open]:bg-[var(--bg-subtle)]",
           className,
         )}
         {...props}

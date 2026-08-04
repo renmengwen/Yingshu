@@ -18,7 +18,7 @@ export function CandidatePanel({ candidates, histories, assetName, busy, onUploa
   const [notes, setNotes] = useState<Record<string, string>>({});
   return <aside className="min-w-0" aria-labelledby="candidate-heading">
     <div className="flex h-12 items-center justify-between border-b border-[var(--border-subtle)] px-4"><h2 id="candidate-heading" className="text-xs font-bold tracking-wider">候选图</h2><span className="font-mono text-[10px] text-[var(--fg-tertiary)]">{candidates.length}</span></div>
-    <label className={`m-3 grid min-h-10 cursor-pointer place-items-center rounded border border-dashed border-[var(--border-subtle)] px-3 text-xs text-[var(--accent)] ${busy || !assetName ? "pointer-events-none opacity-50" : ""}`}>上传原图<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy || !assetName} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUpload(file); }} /></label>
+    <label className="focus-ring-proxy m-3 grid min-h-11 cursor-pointer place-items-center rounded border border-dashed border-[var(--border-subtle)] px-3 text-xs text-[var(--accent)]">上传原图<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy || !assetName} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) onUpload(file); }} /></label>
     <div className="max-h-[calc(100vh-457px)] overflow-y-auto p-3">{candidates.map((candidate) => {
       const source = candidate.source;
       const history = histories[candidate.id];
