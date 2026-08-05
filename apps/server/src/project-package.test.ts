@@ -26,7 +26,7 @@ const TIMELINE = "a".repeat(64);
 const hash = (content: string | Buffer) => createHash("sha256").update(content).digest("hex");
 
 test("项目包恢复兼容版本是显式持久合同", () => {
-  assert.deepEqual(RESTORABLE_PROJECT_SCHEMA_VERSIONS, [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+  assert.deepEqual(RESTORABLE_PROJECT_SCHEMA_VERSIONS, [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
 });
 
 async function put(root: string, relativePath: string, content: string | Buffer) {
@@ -121,7 +121,21 @@ async function mutateManifest(packagePath: string, mutate: (manifest: any) => vo
   await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function downgradeDatabaseFromV27(database: DatabaseSync) {
+  database.exec(`
+    DROP TRIGGER video_zhihu_video_delete_begin;
+    DROP TRIGGER video_zhihu_video_delete_end;
+    DROP TABLE video_zhihu_analysis_selection_events;
+    DROP TABLE video_zhihu_analysis_selections;
+    DROP TABLE video_zhihu_analysis_jobs;
+    DROP TABLE video_zhihu_analysis_snapshots;
+    DROP TABLE video_zhihu_delete_context;
+    DELETE FROM schema_migrations WHERE version=27;
+  `);
+}
+
 function downgradeDatabaseToV14(database: DatabaseSync) {
+  downgradeDatabaseFromV27(database);
   database.exec(`
     DROP TABLE video_final_videos;
     DROP TABLE video_render_chunks;
@@ -164,6 +178,7 @@ function downgradeDatabaseToV14(database: DatabaseSync) {
 }
 
 function downgradeDatabaseToV13(database: DatabaseSync) {
+  downgradeDatabaseFromV27(database);
   database.exec(`
     DROP TABLE video_final_videos;
     DROP TABLE video_render_chunks;
@@ -200,6 +215,7 @@ function downgradeDatabaseToV13(database: DatabaseSync) {
 }
 
 function downgradeDatabaseToV17(database: DatabaseSync) {
+  downgradeDatabaseFromV27(database);
   database.exec(`
     DROP TABLE video_final_videos;
     DROP TABLE video_render_chunks;
@@ -238,6 +254,7 @@ function downgradeDatabaseToV17(database: DatabaseSync) {
 }
 
 function downgradeDatabaseToV25(database: DatabaseSync) {
+  downgradeDatabaseFromV27(database);
   database.exec(`
     DROP TRIGGER video_douyin_video_delete_begin;
     DROP TRIGGER video_douyin_video_delete_end;
@@ -320,7 +337,7 @@ test("创建 WAL 一致项目包并恢复到不存在的数据根", async () => 
     await restoreProjectPackage(packagePath, restored);
     const restoredDb = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(restoredDb.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
+      assert.equal(restoredDb.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 27);
       assert.equal((restoredDb.prepare("SELECT status FROM jobs WHERE id='wal-latest'").get() as { status: string }).status, "queued");
       assert.equal((restoredDb.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check, "ok");
     } finally { restoredDb.close(); }
@@ -331,7 +348,7 @@ test("创建 WAL 一致项目包并恢复到不存在的数据根", async () => 
   } finally { await cleanup(current); }
 });
 
-test("合法 v25 项目包在私有 staging 升级到 v26 且不改写原包", async () => {
+test("合法 v25 项目包在私有 staging 升级到 v27 且不改写原包", async () => {
   const current = await fixture();
   try {
     const packagePath = join(current.root, "project-package-v25");
@@ -342,12 +359,12 @@ test("合法 v25 项目包在私有 staging 升级到 v26 且不改写原包", a
     await refreshPackagedDatabaseIdentity(packagePath);
     const originalDatabaseHash = hash(await readFile(join(packagePath, "payload", "yingshu.sqlite3")));
 
-    const restored = join(current.root, "restored-v26");
+    const restored = join(current.root, "restored-v27");
     await restoreProjectPackage(packagePath, restored);
     assert.equal(hash(await readFile(join(packagePath, "payload", "yingshu.sqlite3"))), originalDatabaseHash);
     const restoredDatabase = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(restoredDatabase.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
+      assert.equal(restoredDatabase.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 27);
       assert.equal(restoredDatabase.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='video_douyin_analysis_snapshots'",
       ).get()?.name, "video_douyin_analysis_snapshots");
@@ -374,7 +391,7 @@ test("合法 v14 项目包在私有 staging 升级到当前版本并保留完整
     try {
       assert.deepEqual(
         (restoredDatabase.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>).map((row) => row.version),
-        Array.from({ length: 26 }, (_, index) => index + 1),
+        Array.from({ length: 27 }, (_, index) => index + 1),
       );
       for (const [table, count] of Object.entries({
         episodes: 1, episode_sources: 1, script_versions: 2, script_version_sources: 2,
@@ -408,7 +425,7 @@ test("合法 v13 封存项目包恢复时升级到 v18", async () => {
     await restoreProjectPackage(packagePath, restored);
     const database = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
+      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 27);
       assert.equal(database.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
     } finally { database.close(); }
   } finally { await cleanup(current); }
@@ -444,7 +461,7 @@ test("合法 v17 项目包恢复时补齐 v18 合同列", async () => {
     await restoreProjectPackage(packagePath, restored);
     const database = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
     try {
-      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
+      assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 27);
       assert.equal(database.prepare(
         "SELECT script_contract_version FROM script_versions WHERE id = ?",
       ).get(current.packagedScriptId)?.script_contract_version, 5);
@@ -550,7 +567,7 @@ test("项目包创建仍严格要求当前版本，恢复拒绝未来或有缺�
         { packagePath, finalManifestRelativePath: current.finalManifestRelativePath });
       const database = new DatabaseSync(join(packagePath, "payload", "yingshu.sqlite3"));
       try {
-        if (kind === "future") database.prepare("INSERT INTO schema_migrations (version) VALUES (27)").run();
+        if (kind === "future") database.prepare("INSERT INTO schema_migrations (version) VALUES (28)").run();
         else database.prepare("DELETE FROM schema_migrations WHERE version=13").run();
       } finally { database.close(); }
       await refreshPackagedDatabaseIdentity(packagePath);

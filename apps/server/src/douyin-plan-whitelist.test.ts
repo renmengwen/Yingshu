@@ -73,9 +73,15 @@ async function runRole(role: DouyinUsageRole, partialAsr = false) {
   const connection = openDatabase(dataRoot);
   const project = createProject(connection.database, { name: "测试项目" }, 1);
   const video = createVideo(connection.database, project.id, { title: "测试视频" }, 2);
-  putVideoInput(connection.database, project.id, video.id, { inputMode: "topic", topic: "用户原主题", body: "",
-    referenceText: "用户参考", referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard",
-    webEnabled: role === "topic_seed", scriptInstructions: "", visualInstructions: "" }, 3);
+  if (role === "method_only") {
+    putVideoInput(connection.database, project.id, video.id, { inputMode: "topic", topic: "用户原主题", body: "",
+      referenceText: "用户参考", referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard",
+      webEnabled: false, scriptInstructions: "", visualInstructions: "" }, 3);
+  } else {
+    putVideoInput(connection.database, project.id, video.id, { inputMode: "topic", topic: "", body: "",
+      referenceText: "", referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard",
+      webEnabled: role === "topic_seed", scriptInstructions: "", visualInstructions: "" }, 3, true);
+  }
   const analysis = enqueueDouyinAnalysis(connection.database, { projectId: project.id, videoId: video.id,
     awemeId: "12345", sourceUrl: "https://www.douyin.com/video/12345",
     config: { sourceText: "https://www.douyin.com/video/12345", extractFrames: true, frameCount: 12,
@@ -87,7 +93,7 @@ async function runRole(role: DouyinUsageRole, partialAsr = false) {
     selection: { snapshotId: completed.id, usageRole: role, creativeAngle: "用户改写角度", rightsConfirmed: role === "content_source",
       acceptedMissingDimensions: partialAsr ? ["asr"] : [] } });
   enqueueVideoPlanJob(connection.database, { projectId: project.id, videoId: video.id,
-    idempotencyKey: `plan-${role}`, config, now: 7 });
+    idempotencyKey: `plan-${role}`, entryMode: "douyin", config, now: 7 });
   const prompts: string[] = [];
   const worker = new JobWorker(connection.database, { [VIDEO_PLAN_JOB_TYPE]: createVideoPlanJobHandler(
     connection.database, config, async ({ stage, prompt }) => {
@@ -132,6 +138,23 @@ test("部分 ASR 必须由同一报告事件显式接受后才可进入实际 pr
   const value = await runRole("topic_seed", true);
   try {
     assert.match(value.prompts.join("\n"), /冻结抖音选题|https:\/\/example\.com\/independent/u);
+  } finally {
+    value.connection.close();
+    await rm(value.dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("普通输入入口默认忽略已经保存的抖音使用方式", async () => {
+  const value = await runRole("method_only");
+  try {
+    const video = value.connection.database.prepare("SELECT id,project_id FROM videos LIMIT 1")
+      .get() as { id: string; project_id: string };
+    enqueueVideoPlanJob(value.connection.database, { projectId: video.project_id, videoId: video.id,
+      idempotencyKey: "primary-after-douyin", config, now: 8 });
+    const row = value.connection.database.prepare(
+      "SELECT input_json FROM video_plan_snapshots WHERE video_id=? AND idempotency_key=?",
+    ).get(video.id, "primary-after-douyin") as { input_json: string };
+    assert.equal((JSON.parse(row.input_json) as { douyin: unknown }).douyin, null);
   } finally {
     value.connection.close();
     await rm(value.dataRoot, { recursive: true, force: true });

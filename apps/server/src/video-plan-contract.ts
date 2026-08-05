@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
 import type { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
 import type { FrozenDouyinPlanInput } from "./douyin-plan-whitelist.js";
+import type { FrozenZhihuPlanInput } from "./zhihu-plan-whitelist.js";
 
 export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
 export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
@@ -27,7 +28,7 @@ export interface VideoPlanModelSnapshot {
 export interface FrozenVideoPlanSnapshot {
   id: string;
   videoId: string;
-  input: ReturnType<typeof getVideoInput> & { douyin?: FrozenDouyinPlanInput | null };
+  input: ReturnType<typeof getVideoInput> & { douyin?: FrozenDouyinPlanInput | null; zhihu?: FrozenZhihuPlanInput | null };
   prompts: {
     global: ReturnType<typeof getGlobalPromptSettings>;
     project: ReturnType<typeof getProjectSettings>;
@@ -250,13 +251,14 @@ export function createVideoPlanModelSnapshot(config: ChapterTextModelConfig): Vi
 }
 
 export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonly VideoPlanSourceEvidence[] = []) {
-  const { douyin = null, ...creativeInput } = snapshot.input;
-  const currentOperation = douyin?.usageRole === "topic_seed" || douyin?.usageRole === "content_source"
+  const { douyin = null, zhihu = null, ...creativeInput } = snapshot.input;
+  const external = douyin ?? zhihu;
+  const currentOperation = external?.usageRole === "topic_seed" || external?.usageRole === "content_source"
     ? { input: { targetDurationSeconds: creativeInput.targetDurationSeconds, visualDensity: creativeInput.visualDensity },
-      douyin, webEnabled: creativeInput.webEnabled,
+      douyin, zhihu, webEnabled: creativeInput.webEnabled,
       sourcePolicy: creativeInput.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
       sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })) }
-    : { input: creativeInput, douyin, webEnabled: creativeInput.webEnabled,
+    : { input: creativeInput, douyin, zhihu, webEnabled: creativeInput.webEnabled,
       sourcePolicy: creativeInput.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
       sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })) };
   return [
@@ -280,6 +282,8 @@ export function visualPrompt(snapshot: FrozenVideoPlanSnapshot, script: VideoScr
     "【当前操作】", JSON.stringify({ visualDensity: snapshot.input.visualDensity, targetDurationSeconds: snapshot.input.targetDurationSeconds,
       douyinMethod: snapshot.input.douyin && "methodProfile" in snapshot.input.douyin.payload
         ? { methodProfile: snapshot.input.douyin.payload.methodProfile } : null,
+      zhihuMethod: snapshot.input.zhihu && "methodPatterns" in snapshot.input.zhihu.payload
+        ? { methodPatterns: snapshot.input.zhihu.payload.methodPatterns } : null,
       script: { title: script.title, summary: script.summary, paragraphs: script.paragraphs } }),
   ].join("\n\n");
 }

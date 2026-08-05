@@ -43,6 +43,7 @@ export interface ChapterTextModelConfig {
   model: string;
   providerId: string;
   protocol?: "openai-response" | "anthropic-message";
+  supportsMultimodal?: boolean;
 }
 
 export interface ChapterAnalysisInput {

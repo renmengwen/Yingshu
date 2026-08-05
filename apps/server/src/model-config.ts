@@ -63,6 +63,7 @@ export interface RuntimeModelConfig {
   maxRequestBytes?: number;
   segmentDurationSeconds?: number;
   identityHash?: string;
+  supportsMultimodal?: boolean;
 }
 
 export interface RuntimeModelCapability {
@@ -336,6 +337,7 @@ export function resolveRuntimeModelConfig(
   const identityHash = createHash("sha256").update(JSON.stringify({
     type, providerId, modelId: model.modelId, baseUrl: provider.baseUrl, protocol: asrProtocol ?? provider.protocol,
     maxRequestBytes: model.maxRequestBytes, segmentDurationSeconds: model.segmentDurationSeconds,
+    supportsMultimodal: model.supportsMultimodal === true,
   })).digest("hex");
   return {
     enabled: true,
@@ -356,6 +358,7 @@ export function resolveRuntimeModelConfig(
     maxRequestBytes: model.maxRequestBytes,
     segmentDurationSeconds: model.segmentDurationSeconds,
     identityHash,
+    supportsMultimodal: model.supportsMultimodal === true,
   };
 }
 

@@ -89,16 +89,16 @@ export function parseCreativeInstructions(value: unknown, label = "创作设置"
   };
 }
 
-export function parseVideoInputDraft(value: unknown): VideoInputDraft {
+export function parseVideoInputDraft(value: unknown, options: { allowEmptyPrimary?: boolean } = {}): VideoInputDraft {
   const input = exactObject(value, VIDEO_INPUT_FIELDS, "视频输入草稿字段不完整或包含未支持字段");
   const inputMode = enumeration(input.inputMode, INPUT_MODES, "输入模式");
   const normalizedTopic = topic(input.topic);
   const body = multiline(input.body, "正文", CREATIVE_INPUT_LIMITS.bodyBytes, "bytes");
-  if (inputMode === "topic" && !normalizedTopic) {
-    throw new CreativeInputError(400, "请输入主题后再保存草稿");
+  if (!options.allowEmptyPrimary && inputMode === "topic" && !normalizedTopic) {
+    throw new CreativeInputError(400, "请输入主题后再生成方案");
   }
-  if (inputMode === "body" && !body) {
-    throw new CreativeInputError(400, "请粘贴正文后再保存草稿");
+  if (!options.allowEmptyPrimary && inputMode === "body" && !body) {
+    throw new CreativeInputError(400, "请粘贴正文后再生成方案");
   }
   if (typeof input.targetDurationSeconds !== "number" ||
       !Number.isInteger(input.targetDurationSeconds) ||

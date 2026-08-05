@@ -63,7 +63,9 @@ export async function registerCreativeInputRoutes(
         return {
           ok: true,
           message: "视频输入草稿已保存",
-          input: putVideoInput(options.database, request.params.projectId, request.params.videoId, request.body),
+          // 草稿允许主输入暂时为空；真正启动方案任务时再按当前创作起点执行严格门禁。
+          input: putVideoInput(options.database, request.params.projectId, request.params.videoId, request.body,
+            Date.now(), true),
         };
       } catch (error) { return sendInputError(error, reply); }
     },

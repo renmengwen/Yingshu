@@ -1634,6 +1634,92 @@ const MIGRATION_26 = `
   BEGIN SELECT RAISE(ABORT, 'douyin analysis selection events are append-only'); END;
 `;
 
+const MIGRATION_27 = `
+  CREATE TABLE video_zhihu_delete_context (
+    video_id TEXT PRIMARY KEY
+  ) STRICT;
+
+  CREATE TABLE video_zhihu_analysis_snapshots (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    question_id TEXT NOT NULL CHECK (length(question_id) BETWEEN 1 AND 32 AND question_id NOT GLOB '*[^0-9]*'),
+    answer_id TEXT NOT NULL CHECK (length(answer_id) BETWEEN 1 AND 32 AND answer_id NOT GLOB '*[^0-9]*'),
+    source_url TEXT NOT NULL CHECK (length(source_url) BETWEEN 1 AND 2000),
+    config_json TEXT NOT NULL CHECK (json_valid(config_json)),
+    config_hash TEXT NOT NULL CHECK (length(config_hash) = 64 AND config_hash NOT GLOB '*[^0-9a-f]*'),
+    evidence_hash TEXT CHECK (evidence_hash IS NULL OR (length(evidence_hash) = 64 AND evidence_hash NOT GLOB '*[^0-9a-f]*')),
+    report_json TEXT CHECK (report_json IS NULL OR json_valid(report_json)),
+    report_hash TEXT CHECK (report_hash IS NULL OR (length(report_hash) = 64 AND report_hash NOT GLOB '*[^0-9a-f]*')),
+    status TEXT NOT NULL CHECK (status IN ('queued','running','partial','succeeded','failed','cancelled')),
+    completeness TEXT NOT NULL CHECK (completeness IN ('unavailable','partial','complete')),
+    artifact_manifest_json TEXT CHECK (artifact_manifest_json IS NULL OR json_valid(artifact_manifest_json)),
+    model_snapshot_json TEXT CHECK (model_snapshot_json IS NULL OR json_valid(model_snapshot_json)),
+    prompt_version TEXT CHECK (prompt_version IS NULL OR length(prompt_version) BETWEEN 1 AND 200),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    completed_at INTEGER CHECK (completed_at IS NULL OR completed_at >= created_at),
+    invalidated_at INTEGER CHECK (invalidated_at IS NULL OR invalidated_at >= created_at),
+    UNIQUE (id, video_id),
+    UNIQUE (id, video_id, report_hash)
+  ) STRICT;
+  CREATE INDEX video_zhihu_snapshots_current ON video_zhihu_analysis_snapshots(video_id, created_at DESC, id DESC);
+  CREATE INDEX video_zhihu_snapshots_reusable
+    ON video_zhihu_analysis_snapshots(video_id, answer_id, config_hash, status, invalidated_at);
+
+  CREATE TABLE video_zhihu_analysis_jobs (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_zhihu_analysis_snapshots(id, video_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE INDEX video_zhihu_jobs_snapshot ON video_zhihu_analysis_jobs(snapshot_id, created_at DESC);
+  CREATE INDEX video_zhihu_jobs_video ON video_zhihu_analysis_jobs(video_id, created_at DESC);
+
+  CREATE TABLE video_zhihu_analysis_selections (
+    video_id TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    usage_role TEXT NOT NULL CHECK (usage_role IN ('method_only','topic_seed','content_source')),
+    creative_angle TEXT NOT NULL CHECK (length(creative_angle) <= 2000),
+    rights_confirmed INTEGER NOT NULL CHECK (rights_confirmed IN (0,1)),
+    updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+    FOREIGN KEY (snapshot_id, video_id) REFERENCES video_zhihu_analysis_snapshots(id, video_id) ON DELETE RESTRICT
+  ) STRICT;
+
+  CREATE TABLE video_zhihu_analysis_selection_events (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('accept_partial','confirm_rights')),
+    missing_dimensions_json TEXT NOT NULL CHECK (json_valid(missing_dimensions_json)),
+    report_hash TEXT NOT NULL CHECK (length(report_hash) = 64 AND report_hash NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK (created_at >= 0),
+    FOREIGN KEY (snapshot_id, video_id, report_hash)
+      REFERENCES video_zhihu_analysis_snapshots(id, video_id, report_hash) ON DELETE RESTRICT
+  ) STRICT;
+  CREATE INDEX video_zhihu_events_video ON video_zhihu_analysis_selection_events(video_id, created_at, id);
+
+  -- 原始回答身份和执行配置冻结；报告只允许由 Job 推进，选择接受通过事件追加存证。
+  CREATE TRIGGER video_zhihu_snapshots_frozen BEFORE UPDATE ON video_zhihu_analysis_snapshots
+  WHEN OLD.id IS NOT NEW.id OR OLD.video_id IS NOT NEW.video_id OR OLD.question_id IS NOT NEW.question_id
+    OR OLD.answer_id IS NOT NEW.answer_id OR OLD.source_url IS NOT NEW.source_url
+    OR OLD.config_json IS NOT NEW.config_json OR OLD.config_hash IS NOT NEW.config_hash
+    OR OLD.model_snapshot_json IS NOT NEW.model_snapshot_json OR OLD.prompt_version IS NOT NEW.prompt_version
+    OR OLD.created_at IS NOT NEW.created_at OR OLD.invalidated_at IS NOT NULL
+  BEGIN SELECT RAISE(ABORT, 'zhihu analysis snapshot frozen identity is immutable'); END;
+  CREATE TRIGGER video_zhihu_video_delete_begin BEFORE DELETE ON videos
+  BEGIN INSERT OR IGNORE INTO video_zhihu_delete_context (video_id) VALUES (OLD.id); END;
+  CREATE TRIGGER video_zhihu_video_delete_end AFTER DELETE ON videos
+  BEGIN DELETE FROM video_zhihu_delete_context WHERE video_id = OLD.id; END;
+  CREATE TRIGGER video_zhihu_snapshots_no_delete BEFORE DELETE ON video_zhihu_analysis_snapshots
+  WHEN NOT EXISTS (SELECT 1 FROM video_zhihu_delete_context WHERE video_id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'zhihu analysis snapshots are append-only'); END;
+  CREATE TRIGGER video_zhihu_events_immutable BEFORE UPDATE ON video_zhihu_analysis_selection_events
+  BEGIN SELECT RAISE(ABORT, 'zhihu analysis selection events are append-only'); END;
+  CREATE TRIGGER video_zhihu_events_no_delete BEFORE DELETE ON video_zhihu_analysis_selection_events
+  WHEN NOT EXISTS (SELECT 1 FROM video_zhihu_delete_context WHERE video_id = OLD.video_id)
+  BEGIN SELECT RAISE(ABORT, 'zhihu analysis selection events are append-only'); END;
+`;
+
 const MIGRATIONS = [
   MIGRATION_1, MIGRATION_2, MIGRATION_3, MIGRATION_4, MIGRATION_5, MIGRATION_6, MIGRATION_7, MIGRATION_8,
   MIGRATION_9,
@@ -1654,6 +1740,7 @@ const MIGRATIONS = [
   MIGRATION_24,
   MIGRATION_25,
   MIGRATION_26,
+  MIGRATION_27,
 ];
 
 export interface YingshuDatabase {
@@ -1708,6 +1795,24 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
           }
         }
       }
+      const zhihuTables = [
+        "video_zhihu_delete_context", "video_zhihu_analysis_snapshots", "video_zhihu_analysis_jobs",
+        "video_zhihu_analysis_selections", "video_zhihu_analysis_selection_events",
+      ] as const;
+      const staleZhihuTables = index === 26 ? database.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${zhihuTables.map(() => "?").join(",")}) ORDER BY name`,
+      ).all(...zhihuTables) as Array<{ name: string }> : [];
+      if (staleZhihuTables.length) {
+        if (staleZhihuTables.length !== zhihuTables.length || zhihuTables.some((table) =>
+          !staleZhihuTables.some((row) => row.name === table))) {
+          throw new Error("历史数据库包含不完整的知乎分析 v27 表");
+        }
+        for (const table of zhihuTables) {
+          if ((database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count !== 0) {
+            throw new Error("历史数据库包含未登记迁移版本的知乎分析数据");
+          }
+        }
+      }
       const rebuildsReferencedTable = index === 12 || index === 22 || index === 24;
       const videoDeleteTriggers = index === 24 ? database.prepare(
         "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql LIKE '%FROM videos%' ORDER BY name",
@@ -1723,6 +1828,15 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
           DROP TABLE video_douyin_analysis_jobs;
           DROP TABLE video_douyin_analysis_snapshots;
           DROP TABLE video_douyin_delete_context;
+        `);
+        if (staleZhihuTables.length) database.exec(`
+          DROP TRIGGER IF EXISTS video_zhihu_video_delete_begin;
+          DROP TRIGGER IF EXISTS video_zhihu_video_delete_end;
+          DROP TABLE video_zhihu_analysis_selection_events;
+          DROP TABLE video_zhihu_analysis_selections;
+          DROP TABLE video_zhihu_analysis_jobs;
+          DROP TABLE video_zhihu_analysis_snapshots;
+          DROP TABLE video_zhihu_delete_context;
         `);
         for (const trigger of videoDeleteTriggers) {
           database.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);

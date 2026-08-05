@@ -25,6 +25,9 @@ import { registerCreativeInputRoutes } from "./creative-input-routes.js";
 import { registerDouyinAnalysisRoutes } from "./douyin-analysis-routes.js";
 import { createConfiguredDouyinAnalysisJobHandler } from "./douyin-analysis-job.js";
 import { DOUYIN_ANALYSIS_JOB_TYPE } from "./douyin-analysis-contract.js";
+import { registerZhihuAnalysisRoutes } from "./zhihu-analysis-routes.js";
+import { createConfiguredZhihuAnalysisJobHandler } from "./zhihu-analysis-job.js";
+import { ZHIHU_ANALYSIS_JOB_TYPE } from "./zhihu-analysis-contract.js";
 import { createVideoPlanGenerator } from "./video-plan-provider.js";
 import { registerVideoPlanRoutes } from "./video-plan-routes.js";
 import {
@@ -200,6 +203,7 @@ const TEXT_JOB_TYPES = new Set([
   ASSET_PROMPT_DRAFT_JOB_TYPE,
   VIDEO_PLAN_JOB_TYPE,
   DOUYIN_ANALYSIS_JOB_TYPE,
+  ZHIHU_ANALYSIS_JOB_TYPE,
 ]);
 
 interface BuildAppOptions {
@@ -393,6 +397,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       model: runtime.modelId,
       providerId: runtime.providerId,
       protocol: runtime.protocol,
+      supportsMultimodal: runtime.supportsMultimodal,
     };
     if (!identity && stored.active.text) return null;
     const fallback = chapterTextProviderFromEnvironment();
@@ -542,6 +547,9 @@ export function buildApp(options: BuildAppOptions = {}) {
       resolveAsrRuntime: resolveCurrentAsrRuntime,
       resolveTextProvider: () => resolveChapterTextProvider(),
     }),
+    [ZHIHU_ANALYSIS_JOB_TYPE]: createConfiguredZhihuAnalysisJobHandler(connection.database, dataRoot, {
+      resolveTextProvider: (identity) => resolveChapterTextProvider(identity),
+    }),
     ...(options.jobHandlers ?? {}),
   };
   const supportedJobTypes = new Set(Object.keys(jobHandlers));
@@ -642,6 +650,8 @@ export function buildApp(options: BuildAppOptions = {}) {
   void app.register(registerProjectVideoRoutes, { database: connection.database, dataRoot });
   void app.register(registerCreativeInputRoutes, { database: connection.database });
   void app.register(registerDouyinAnalysisRoutes, { database: connection.database });
+  void app.register(registerZhihuAnalysisRoutes, { database: connection.database,
+    resolveTextModel: () => resolveChapterTextProvider() });
   void app.register(registerVideoPlanRoutes, {
     database: connection.database,
     resolveTextModel: () => resolveChapterTextProvider(),

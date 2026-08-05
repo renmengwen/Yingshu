@@ -81,8 +81,14 @@ test("默认空草稿不能绕过保存校验创建方案任务", async () => {
   const video = createVideo(connection.database, project.id, { title: "空草稿视频" }, 20);
   try {
     assert.throws(() => enqueueVideoPlanJob(connection.database, {
-      projectId: project.id, videoId: video.id, idempotencyKey: "empty-draft", config,
-    }), /请输入主题后再保存草稿/);
+      projectId: project.id, videoId: video.id, idempotencyKey: "invalid-entry", entryMode: "other", config,
+    }), /方案创作起点无效/);
+    assert.throws(() => enqueueVideoPlanJob(connection.database, {
+      projectId: project.id, videoId: video.id, idempotencyKey: "missing-douyin", entryMode: "douyin", config,
+    }), /请先完成抖音分析并选择使用方式/);
+    assert.throws(() => enqueueVideoPlanJob(connection.database, {
+      projectId: project.id, videoId: video.id, idempotencyKey: "empty-draft", entryMode: "primary_input", config,
+    }), /请输入主题后再生成方案/);
     assert.equal((connection.database.prepare("SELECT COUNT(*) AS count FROM video_plan_snapshots")
       .get() as { count: number }).count, 0);
     assert.equal((connection.database.prepare("SELECT COUNT(*) AS count FROM video_plan_jobs")

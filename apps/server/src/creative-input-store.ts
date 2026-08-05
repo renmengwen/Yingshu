@@ -100,8 +100,9 @@ export function putVideoInput(
   videoId: string,
   input: unknown,
   now = Date.now(),
+  allowEmptyPrimary = false,
 ) {
-  const draft = parseVideoInputDraft(input);
+  const draft = parseVideoInputDraft(input, { allowEmptyPrimary });
   const video = getVideo(database, projectId, videoId);
   const project = getProject(database, projectId);
   const current = getVideoInput(database, projectId, videoId);

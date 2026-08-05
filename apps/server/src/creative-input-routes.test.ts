@@ -84,7 +84,7 @@ test("创作输入 API 保存后可在应用重建时恢复且 envelope 稳定",
   }
 });
 
-test("创作输入 API 拒绝缺失/额外字段、错误类型和跨项目视频", async () => {
+test("创作输入 API 允许空主内容草稿并拒绝字段漂移、错误类型和跨项目视频", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-creative-input-boundary-"));
   const app = buildApp(dataRoot);
   try {
@@ -102,13 +102,17 @@ test("创作输入 API 拒绝缺失/额外字段、错误类型和跨项目视�
       { ...input(), targetDurationSeconds: 59 },
       { ...input(), visualDensity: "dense" },
       { ...input(), referenceRole: "facts" },
-      { ...input(), topic: "" },
-      { ...input(), inputMode: "body", body: "" },
     ]) {
       assert.equal((await app.inject({
         method: "PUT", url: `/api/projects/${first.id}/videos/${video.id}/input`, payload,
       })).statusCode, 400);
     }
+    assert.equal((await app.inject({
+      method: "PUT", url: `/api/projects/${first.id}/videos/${video.id}/input`, payload: { ...input(), topic: "" },
+    })).statusCode, 200);
+    assert.equal((await app.inject({
+      method: "PUT", url: `/api/projects/${first.id}/videos/${video.id}/input`, payload: { ...input(), inputMode: "body", body: "" },
+    })).statusCode, 200);
     assert.equal((await app.inject({
       method: "PUT", url: `/api/projects/${first.id}/settings`, payload: { scriptInstructions: "缺字段" },
     })).statusCode, 400);

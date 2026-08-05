@@ -59,6 +59,12 @@ test("视频输入严格拒绝字段漂移、错误类型、超限和缺少当�
     (error: unknown) => error instanceof CreativeInputError && error.statusCode === 400);
 });
 
+test("抖音选题或内容来源可只复用制作设置，方法参考仍由调用方要求主输入", () => {
+  const parsed = parseVideoInputDraft({ ...validInput(), topic: "", body: "" }, { allowEmptyPrimary: true });
+  assert.equal(parsed.topic, "");
+  assert.equal(parsed.body, "");
+});
+
 test("提示词层级固定为系统、全局、项目、视频和局部改写", () => {
   assert.equal(layeredCreativePrompt({
     fixedSystemContract: "固定系统合同",

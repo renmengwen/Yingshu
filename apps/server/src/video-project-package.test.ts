@@ -115,10 +115,40 @@ async function fixture() {
   db.prepare(`INSERT INTO video_douyin_analysis_selections
     (video_id,snapshot_id,usage_role,creative_angle,rights_confirmed,updated_at)
     VALUES ('video','snapshot','method_only','',0,3)`).run();
-  return { root, dataRoot, connection, artifacts, evidenceHash };
+  const zhihuAnswerValue = { questionId: "9389089116", answerId: "1976331888235927140",
+    canonicalUrl: "https://www.zhihu.com/question/9389089116/answer/1976331888235927140", questionTitle: "问题",
+    content: "回答正文", excerpt: "摘要", authorName: "作者",
+    publishedAt: 1, updatedAt: 2, voteupCount: 3, commentCount: 1 };
+  const zhihuCommentsValue = { status: "partial", comments: [], pagesFetched: 1, truncated: false,
+    failedReplyCount: 1, replyFailureKinds: ["access_denied"], interpretationOnly: true };
+  const zhihuReportValue = { version: "yingshu-zhihu-analysis-v1", original: { sourceEvidenceOnly: true }, audience: null };
+  const zhihuAnswer = await put(dataRoot, "zhihu/analyses/video/zhihu-snapshot/answer.json", `${JSON.stringify(zhihuAnswerValue)}\n`);
+  const zhihuComments = await put(dataRoot, "zhihu/analyses/video/zhihu-snapshot/comments.json", `${JSON.stringify(zhihuCommentsValue)}\n`);
+  const zhihuReport = await put(dataRoot, "zhihu/analyses/video/zhihu-snapshot/report.json", `${JSON.stringify(zhihuReportValue)}\n`);
+  const zhihuImageHash = H("jpeg-bytes");
+  const zhihuImage = await put(dataRoot, `zhihu/analyses/video/zhihu-snapshot/images/${zhihuImageHash}.jpg`, "jpeg-bytes");
+  const zhihuArtifacts = [zhihuAnswer, zhihuComments, zhihuReport].map((item) => ({
+    id: item.path.includes("answer") ? "answer" : item.path.includes("comments") ? "comments" : "report",
+    kind: item.path.includes("answer") ? "answer" : item.path.includes("comments") ? "comments" : "report",
+    relativePath: item.path, bytes: item.bytes, sha256: item.hash,
+  })).concat([{ id: `image-${zhihuImageHash}`, kind: "image", relativePath: zhihuImage.path,
+    bytes: zhihuImage.bytes, sha256: zhihuImage.hash }]);
+  db.prepare(`INSERT INTO video_zhihu_analysis_snapshots
+    (id,video_id,question_id,answer_id,source_url,config_json,config_hash,evidence_hash,report_json,report_hash,status,completeness,
+     artifact_manifest_json,model_snapshot_json,prompt_version,created_at,completed_at)
+    VALUES ('zhihu-snapshot','video','9389089116','1976331888235927140',?,'{}',?,?,?,?,'succeeded','complete',?,'{}','v1',2,3)`)
+    .run(zhihuAnswerValue.canonicalUrl, X("3"), X("4"), JSON.stringify(zhihuReportValue), X("5"),
+      JSON.stringify({ version: "yingshu-zhihu-evidence-v1", evidenceHash: X("4"), artifacts: zhihuArtifacts,
+        answer: zhihuAnswerValue, images: [{ evidenceRef: `answer:image:${zhihuImageHash}`, sha256: zhihuImageHash, mime: "image/jpeg",
+        bytes: zhihuImage.bytes }], comments: { status: "partial", failure: null, items: [], pagesFetched: 1,
+          truncated: false, failedReplyCount: 1, replyFailureKinds: ["access_denied"], interpretationOnly: true } }));
+  db.prepare(`INSERT INTO video_zhihu_analysis_selections
+    (video_id,snapshot_id,usage_role,creative_angle,rights_confirmed,updated_at)
+    VALUES ('video','zhihu-snapshot','method_only','',0,3)`).run();
+  return { root, dataRoot, connection, artifacts, zhihuArtifacts, evidenceHash };
 }
 
-test("v26 Video 项目包恢复当前抖音证据且排除缓存和秘密", async () => {
+test("v27 Video 项目包恢复当前抖音证据且排除缓存和秘密", async () => {
   const value = await fixture();
   try {
     const packagePath = join(value.root, "package");
@@ -157,8 +187,14 @@ test("v26 Video 项目包恢复当前抖音证据且排除缓存和秘密", asyn
     assert.deepEqual(new Set(created.manifest.files.map((file) => file.role)), new Set([
       "database", "approved-image", "tts-audio", "subtitle-srt", "subtitle-ass", "render-chunk", "final-video", "final-manifest",
       "douyin-metadata", "douyin-transcript", "douyin-comments", "douyin-report",
+      "zhihu-answer", "zhihu-comments", "zhihu-report",
+      "zhihu-image",
     ]));
-    assert.equal(created.manifest.schemaVersion, 26);
+    assert.equal(created.manifest.schemaVersion, 27);
+    assert.equal(JSON.stringify(created.manifest).includes("zhimg.com"), false);
+    const packagedAnswer = await readFile(join(packagePath, "payload", "zhihu", "analyses", "video", "zhihu-snapshot", "answer.json"), "utf8");
+    assert.equal(packagedAnswer.includes("zhimg.com"), false);
+    assert.equal("imageUrls" in JSON.parse(packagedAnswer), false);
     assert.equal(created.manifest.files.some((file) => file.path.includes("cache") || file.path.includes("cookie")), false);
     const restored = join(value.root, "restored");
     await restoreVideoProjectPackage(packagePath, restored);
@@ -175,8 +211,14 @@ test("v26 Video 项目包恢复当前抖音证据且排除缓存和秘密", asyn
       assert.deepEqual({ ...database.prepare(
         "SELECT evidence_hash,report_hash FROM video_douyin_analysis_snapshots WHERE id='snapshot'",
       ).get() }, { evidence_hash: value.evidenceHash, report_hash: X("1") });
+      assert.deepEqual({ ...database.prepare(
+        "SELECT snapshot_id,usage_role FROM video_zhihu_analysis_selections WHERE video_id='video'",
+      ).get() }, { snapshot_id: "zhihu-snapshot", usage_role: "method_only" });
     } finally { database.close(); }
     for (const artifact of value.artifacts) {
+      assert.equal(H(await readFile(join(restored, ...artifact.relativePath.split("/")))), artifact.sha256);
+    }
+    for (const artifact of value.zhihuArtifacts) {
       assert.equal(H(await readFile(join(restored, ...artifact.relativePath.split("/")))), artifact.sha256);
     }
     await assert.rejects(readFile(join(restored, "douyin/cache/12345/video.mp4")), { code: "ENOENT" });

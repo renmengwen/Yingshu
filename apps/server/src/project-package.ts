@@ -11,8 +11,8 @@ import { scriptApprovalEventId } from "./script-approval-store.js";
 import { validateStoredScriptVersion } from "./script-version-store.js";
 
 export const PROJECT_PACKAGE_VERSION = "narralume-project-package-v1" as const;
-export const RESTORABLE_PROJECT_SCHEMA_VERSIONS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] as const;
-const CURRENT_SCHEMA_VERSION = 26;
+export const RESTORABLE_PROJECT_SCHEMA_VERSIONS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27] as const;
+const CURRENT_SCHEMA_VERSION = 27;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 10_000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024;

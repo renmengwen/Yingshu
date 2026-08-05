@@ -6,6 +6,8 @@ import { parseVideoInputDraft } from "./creative-input-contract.js";
 import { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
 import { getDouyinAnalysisSelection, getDouyinAnalysisSnapshot } from "./douyin-analysis-store.js";
 import { buildFrozenDouyinPlanInput } from "./douyin-plan-whitelist.js";
+import { getZhihuAnalysisSelection, getZhihuAnalysisSnapshot } from "./zhihu-analysis-store.js";
+import { buildFrozenZhihuPlanInput } from "./zhihu-plan-whitelist.js";
 import { createJob, getJob } from "./job-store.js";
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { getProject, getVideo } from "./project-video-store.js";
@@ -27,6 +29,7 @@ export type CreateVideoPlanGenerator = (config: ChapterTextModelConfig) => Gener
 export type VideoPlanGeneratorSource = GenerateVideoPlan | { create: CreateVideoPlanGenerator };
 export type ResolveVideoPlanModel = (providerId: string) =>
   ChapterTextModelConfig | null | Promise<ChapterTextModelConfig | null>;
+export type VideoPlanEntryMode = "primary_input" | "douyin" | "zhihu";
 
 function acceptsPartialAsr(row: { event_type: "accept_partial" | "confirm_rights"; missing_dimensions_json: string }) {
   if (row.event_type !== "accept_partial") return false;
@@ -38,18 +41,33 @@ function acceptsPartialAsr(row: { event_type: "accept_partial" | "confirm_rights
 }
 
 export function enqueueVideoPlanJob(database: DatabaseSync, input: {
-  projectId: string; videoId: string; idempotencyKey: unknown; config: ChapterTextModelConfig; now?: number;
+  projectId: string; videoId: string; idempotencyKey: unknown; config: ChapterTextModelConfig;
+  entryMode?: unknown; now?: number;
 }) {
   const now = input.now ?? Date.now();
   getProject(database, input.projectId);
   getVideo(database, input.projectId, input.videoId);
   const idempotencyKey = planText(input.idempotencyKey, "幂等键", 200);
   if (!VIDEO_PLAN_ID.test(idempotencyKey)) throw new VideoPlanError(400, "幂等键只能包含字母、数字、下划线或连字符");
+  const entryMode = input.entryMode ?? "primary_input";
+  if (entryMode !== "primary_input" && entryMode !== "douyin" && entryMode !== "zhihu") {
+    throw new VideoPlanError(400, "方案创作起点无效");
+  }
   const storedDraft = getVideoInput(database, input.projectId, input.videoId);
   const { updatedAt, ...editableDraft } = storedDraft;
-  // 任务入口重新校验数据库默认草稿，防止空主题或正文绕过保存接口直接触发联网和模型调用。
-  const parsedDraft = { ...parseVideoInputDraft(editableDraft), updatedAt };
-  const selection = getDouyinAnalysisSelection(database, input.projectId, input.videoId);
+  // 普通输入不消费已绑定抖音，只有用户明确从抖音入口生成时才读取冻结来源。
+  const selection = entryMode === "douyin"
+    ? getDouyinAnalysisSelection(database, input.projectId, input.videoId)
+    : null;
+  const zhihuSelection = entryMode === "zhihu"
+    ? getZhihuAnalysisSelection(database, input.projectId, input.videoId)
+    : null;
+  if (entryMode === "douyin" && !selection) {
+    throw new VideoPlanError(409, "请先完成抖音分析并选择使用方式，再生成方案");
+  }
+  if (entryMode === "zhihu" && !zhihuSelection) {
+    throw new VideoPlanError(409, "请先完成知乎分析并选择使用方式，再生成方案");
+  }
   const douyin = selection ? (() => {
     const analysis = getDouyinAnalysisSnapshot(database, input.projectId, input.videoId, selection.snapshotId);
     const eventRows = database.prepare(
@@ -62,7 +80,33 @@ export function enqueueVideoPlanJob(database: DatabaseSync, input: {
       acceptedPartial: eventRows.some(acceptsPartialAsr),
       rightsEventConfirmed: eventRows.some((row) => row.event_type === "confirm_rights") });
   })() : null;
-  const draft = { ...parsedDraft, webEnabled: douyin?.usageRole === "topic_seed" ? true : parsedDraft.webEnabled, douyin };
+  const zhihu = zhihuSelection ? (() => {
+    const analysis = getZhihuAnalysisSnapshot(database, input.projectId, input.videoId, zhihuSelection.snapshotId);
+    const eventRows = database.prepare(
+      `SELECT event_type,missing_dimensions_json FROM video_zhihu_analysis_selection_events
+       WHERE video_id=? AND snapshot_id=? AND report_hash=?`,
+    ).all(input.videoId, analysis.id, analysis.reportHash) as Array<{
+      event_type: "accept_partial" | "confirm_rights"; missing_dimensions_json: string;
+    }>;
+    const accepted = new Set<string>();
+    for (const row of eventRows) if (row.event_type === "accept_partial") {
+      const dimensions = JSON.parse(row.missing_dimensions_json) as unknown;
+      if (!Array.isArray(dimensions) || dimensions.some((item) => typeof item !== "string")) {
+        throw new VideoPlanError(409, "知乎部分结果接受事件无效");
+      }
+      for (const dimension of dimensions) accepted.add(dimension);
+    }
+    return buildFrozenZhihuPlanInput({ snapshot: analysis, selection: zhihuSelection,
+      acceptedMissingDimensions: accepted as Set<"original" | "method" | "topic" | "audience" | "comments">,
+      rightsEventConfirmed: eventRows.some((row) => row.event_type === "confirm_rights") });
+  })() : null;
+  // 方法参考仍需要主题或正文；选题沿用和内容改写可由已冻结抖音证据独立提供主内容。
+  const parsedDraft = { ...parseVideoInputDraft(editableDraft, {
+    allowEmptyPrimary: Boolean((douyin && douyin.usageRole !== "method_only") || (zhihu && zhihu.usageRole !== "method_only")),
+  }), updatedAt };
+  const draft = { ...parsedDraft,
+    webEnabled: douyin?.usageRole === "topic_seed" || zhihu?.usageRole === "topic_seed" ? true : parsedDraft.webEnabled,
+    douyin, zhihu };
   const model = createVideoPlanModelSnapshot(input.config);
   const prompts = {
     global: getGlobalPromptSettings(database), project: getProjectSettings(database, input.projectId),
@@ -255,6 +299,10 @@ export function createVideoPlanJobHandler(
 function videoPlanSearchQuery(snapshot: FrozenVideoPlanSnapshot) {
   if (snapshot.input.douyin?.usageRole === "topic_seed") {
     return planText(snapshot.input.douyin.payload.topic, "抖音选题", 200).replace(/\s+/gu, " ").slice(0, 120);
+  }
+  if (snapshot.input.zhihu?.usageRole === "topic_seed") {
+    const first = (snapshot.input.zhihu.payload.topicInsights as Array<{ conclusion?: unknown }> | undefined)?.[0]?.conclusion;
+    return planText(first, "知乎选题", 200).replace(/\s+/gu, " ").slice(0, 120);
   }
   const value = snapshot.input.inputMode === "topic" ? snapshot.input.topic : snapshot.input.body;
   return value.replace(/\s+/gu, " ").trim().slice(0, 120);

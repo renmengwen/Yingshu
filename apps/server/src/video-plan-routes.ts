@@ -21,13 +21,13 @@ export async function registerVideoPlanRoutes(app: FastifyInstance, options: {
   database: DatabaseSync;
   resolveTextModel: () => ChapterTextModelConfig | null | Promise<ChapterTextModelConfig | null>;
 }) {
-  app.post<{ Params: Params; Body: { idempotencyKey?: unknown } }>(
+  app.post<{ Params: Params; Body: { idempotencyKey?: unknown; entryMode?: unknown } }>(
     "/api/projects/:projectId/videos/:videoId/plan-jobs", async (request, reply) => {
       try {
         const config = await options.resolveTextModel();
         if (!config) throw new VideoPlanError(409, "文本模型未配置或不可用，请先在设置中完成配置");
         const result = enqueueVideoPlanJob(options.database, { ...request.params,
-          idempotencyKey: request.body?.idempotencyKey, config });
+          idempotencyKey: request.body?.idempotencyKey, entryMode: request.body?.entryMode, config });
         return { ok: true, message: result.created ? "方案任务已创建" : "已返回同一次方案任务",
           job: videoPlanJobSummary(result.job), videoStatus: videoStatus(options.database, request.params.projectId, request.params.videoId) };
       } catch (error) { return sendError(error, reply); }
