@@ -4,6 +4,8 @@ import type { DatabaseSync } from "node:sqlite";
 import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
 import { parseVideoInputDraft } from "./creative-input-contract.js";
 import { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
+import { getDouyinAnalysisSelection, getDouyinAnalysisSnapshot } from "./douyin-analysis-store.js";
+import { buildFrozenDouyinPlanInput } from "./douyin-plan-whitelist.js";
 import { createJob, getJob } from "./job-store.js";
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { getProject, getVideo } from "./project-video-store.js";
@@ -37,7 +39,19 @@ export function enqueueVideoPlanJob(database: DatabaseSync, input: {
   const storedDraft = getVideoInput(database, input.projectId, input.videoId);
   const { updatedAt, ...editableDraft } = storedDraft;
   // 任务入口重新校验数据库默认草稿，防止空主题或正文绕过保存接口直接触发联网和模型调用。
-  const draft = { ...parseVideoInputDraft(editableDraft), updatedAt };
+  const parsedDraft = { ...parseVideoInputDraft(editableDraft), updatedAt };
+  const selection = getDouyinAnalysisSelection(database, input.projectId, input.videoId);
+  const douyin = selection ? (() => {
+    const analysis = getDouyinAnalysisSnapshot(database, input.projectId, input.videoId, selection.snapshotId);
+    const eventRows = database.prepare(
+      `SELECT event_type FROM video_douyin_analysis_selection_events
+       WHERE video_id=? AND snapshot_id=? AND report_hash=?`,
+    ).all(input.videoId, analysis.id, analysis.reportHash) as Array<{ event_type: "accept_partial" | "confirm_rights" }>;
+    return buildFrozenDouyinPlanInput({ snapshot: analysis, selection,
+      acceptedPartial: eventRows.some((row) => row.event_type === "accept_partial"),
+      rightsEventConfirmed: eventRows.some((row) => row.event_type === "confirm_rights") });
+  })() : null;
+  const draft = { ...parsedDraft, webEnabled: douyin?.usageRole === "topic_seed" ? true : parsedDraft.webEnabled, douyin };
   const model = createVideoPlanModelSnapshot(input.config);
   const prompts = {
     global: getGlobalPromptSettings(database), project: getProjectSettings(database, input.projectId),
@@ -228,6 +242,9 @@ export function createVideoPlanJobHandler(
 }
 
 function videoPlanSearchQuery(snapshot: FrozenVideoPlanSnapshot) {
+  if (snapshot.input.douyin?.usageRole === "topic_seed") {
+    return planText(snapshot.input.douyin.payload.topic, "抖音选题", 200).replace(/\s+/gu, " ").slice(0, 120);
+  }
   const value = snapshot.input.inputMode === "topic" ? snapshot.input.topic : snapshot.input.body;
   return value.replace(/\s+/gu, " ").trim().slice(0, 120);
 }

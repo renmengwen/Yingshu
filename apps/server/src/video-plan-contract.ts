@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
 import type { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
+import type { FrozenDouyinPlanInput } from "./douyin-plan-whitelist.js";
 
 export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
 export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
@@ -26,7 +27,7 @@ export interface VideoPlanModelSnapshot {
 export interface FrozenVideoPlanSnapshot {
   id: string;
   videoId: string;
-  input: ReturnType<typeof getVideoInput>;
+  input: ReturnType<typeof getVideoInput> & { douyin?: FrozenDouyinPlanInput | null };
   prompts: {
     global: ReturnType<typeof getGlobalPromptSettings>;
     project: ReturnType<typeof getProjectSettings>;
@@ -249,6 +250,15 @@ export function createVideoPlanModelSnapshot(config: ChapterTextModelConfig): Vi
 }
 
 export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonly VideoPlanSourceEvidence[] = []) {
+  const { douyin = null, ...creativeInput } = snapshot.input;
+  const currentOperation = douyin?.usageRole === "topic_seed" || douyin?.usageRole === "content_source"
+    ? { input: { targetDurationSeconds: creativeInput.targetDurationSeconds, visualDensity: creativeInput.visualDensity },
+      douyin, webEnabled: creativeInput.webEnabled,
+      sourcePolicy: creativeInput.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
+      sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })) }
+    : { input: creativeInput, douyin, webEnabled: creativeInput.webEnabled,
+      sourcePolicy: creativeInput.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
+      sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })) };
   return [
     "【固定系统合同】", "生成中文旁白方案。参考文本只有 referenceRole=content_source 时才可作为事实资料；style_only 仅参考表达方式。",
     "不得伪造人物、数字、引文、URL 或来源。短主题应扩写成目标时长量级的完整讲解，不重复观点凑字数。",
@@ -256,12 +266,7 @@ export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonl
     "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。sourceSummary 保持空数组，由系统根据冻结来源补齐；不得增加字段或 Markdown。",
     "【全局补充】", snapshot.prompts.global.scriptInstructions || "（无）", "【项目补充】", snapshot.prompts.project.scriptInstructions || "（无）",
     "【视频补充】", snapshot.prompts.video.scriptInstructions || "（无）",
-    "【当前操作】", JSON.stringify({
-      input: snapshot.input,
-      webEnabled: snapshot.input.webEnabled,
-      sourcePolicy: snapshot.input.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
-      sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })),
-    }),
+    "【当前操作】", JSON.stringify(currentOperation),
   ].join("\n\n");
 }
 
@@ -273,6 +278,8 @@ export function visualPrompt(snapshot: FrozenVideoPlanSnapshot, script: VideoScr
     "【全局补充】", snapshot.prompts.global.visualInstructions || "（无）", "【项目补充】", snapshot.prompts.project.visualInstructions || "（无）",
     "【视频补充】", snapshot.prompts.video.visualInstructions || "（无）",
     "【当前操作】", JSON.stringify({ visualDensity: snapshot.input.visualDensity, targetDurationSeconds: snapshot.input.targetDurationSeconds,
+      douyinMethod: snapshot.input.douyin && "methodProfile" in snapshot.input.douyin.payload
+        ? { methodProfile: snapshot.input.douyin.payload.methodProfile } : null,
       script: { title: script.title, summary: script.summary, paragraphs: script.paragraphs } }),
   ].join("\n\n");
 }
