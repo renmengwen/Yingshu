@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { backup, DatabaseSync, type DatabaseSync as Database } from "node:sqlite";
 
 export const VIDEO_PROJECT_PACKAGE_VERSION = "yingshu-video-project-package-v1" as const;
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 const HASH = /^[0-9a-f]{64}$/u;
 const MAX_FILES = 10_000;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
@@ -14,6 +14,11 @@ const MAX_TOTAL_BYTES = 100 * 1024 * 1024 * 1024;
 const DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
 interface PackageFile { path: string; role: string; bytes: number; sha256: string }
+
+const DOUYIN_MANIFEST_VERSION = "yingshu-douyin-evidence-v1";
+const DOUYIN_ARTIFACT_KINDS = new Set(["metadata", "video", "audio", "transcript", "frame", "comments", "report"]);
+const SECRET_KEY = /(?:authorization|api.?key|cookie|access.?token|refresh.?token|client.?secret|password|browser.?profile|profile.?path|download.?url|play.?url|audio.?url)/iu;
+const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/u;
 
 export interface VideoProjectPackageManifest {
   version: typeof VIDEO_PROJECT_PACKAGE_VERSION;
@@ -120,10 +125,18 @@ async function measureOrdinary(path: string, maxBytes = MAX_FILE_BYTES) {
   } finally { await handle.close(); }
 }
 
+async function assertSafeDouyinJson(root: string, file: PackageFile) {
+  if (!file.role.startsWith("douyin-") || !file.path.endsWith(".json")) return;
+  const measured = await measureOrdinary(controlled(root, file.path), MAX_MANIFEST_BYTES);
+  if (measured.bytes !== file.bytes || measured.sha256 !== file.sha256) throw new Error("抖音证据 JSON 哈希不一致");
+  try { assertNoSecrets(JSON.parse(measured.content!.toString("utf8")), "抖音证据文件"); }
+  catch (error) { if (error instanceof SyntaxError) throw new Error("抖音证据文件不是有效 JSON"); throw error; }
+}
+
 function validateDatabase(database: Database) {
   const versions = database.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>;
   if (versions.length !== SCHEMA_VERSION || versions.some((row, index) => row.version !== index + 1)) {
-    throw new Error("视频项目包只支持当前 v25 数据库");
+    throw new Error("视频项目包只支持当前 v26 数据库");
   }
   if (database.prepare("PRAGMA integrity_check").get()?.integrity_check !== "ok" || database.prepare("PRAGMA foreign_key_check").all().length) {
     throw new Error("视频项目数据库完整性校验失败");
@@ -134,7 +147,94 @@ const NO_DELETE_TRIGGERS = [
   "video_plan_snapshots_no_delete", "video_script_revisions_no_delete", "video_visual_revisions_no_delete",
   "video_plan_approvals_no_delete", "video_image_candidates_no_delete", "video_image_approvals_no_delete",
   "video_tts_snapshots_no_delete", "video_tts_artifacts_no_delete", "video_tts_cues_no_delete", "video_audio_reviews_no_delete",
+  "video_douyin_snapshots_no_delete", "video_douyin_events_no_delete",
 ] as const;
+
+function assertNoSecrets(value: unknown, label: string) {
+  const visit = (current: unknown) => {
+    if (typeof current === "string") {
+      if (ABSOLUTE_PATH.test(current) || /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/iu.test(current)) {
+        throw new Error(`${label}包含绝对路径或秘密`);
+      }
+      return;
+    }
+    if (Array.isArray(current)) { current.forEach(visit); return; }
+    if (!current || typeof current !== "object") return;
+    for (const [key, child] of Object.entries(current)) {
+      if (SECRET_KEY.test(key)) throw new Error(`${label}包含秘密字段`);
+      visit(child);
+    }
+  };
+  visit(value);
+}
+
+function parseDouyinManifest(value: string, videoId: string, snapshotId: string, evidenceHash: string | null) {
+  let manifest: unknown;
+  try { manifest = JSON.parse(value); } catch { throw new Error("抖音证据清单不是有效 JSON"); }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("抖音证据清单合同无效");
+  const record = manifest as Record<string, unknown>;
+  const allowedTop = new Set(["version", "evidenceHash", "artifacts", "transcript", "frames", "comments"]);
+  if (Object.keys(record).some((key) => !allowedTop.has(key)) || record.version !== DOUYIN_MANIFEST_VERSION ||
+      typeof record.evidenceHash !== "string" || !HASH.test(record.evidenceHash) || record.evidenceHash !== evidenceHash ||
+      !Array.isArray(record.artifacts) || record.artifacts.length < 1 || record.artifacts.length > 1_000) {
+    throw new Error("抖音证据清单合同无效");
+  }
+  assertNoSecrets(record, "抖音证据清单");
+  const artifacts = record.artifacts as unknown[];
+  const prefix = `douyin/analyses/${videoId}/${snapshotId}/`;
+  const ids = new Set<string>();
+  const files = artifacts.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("抖音证据产物合同无效");
+    const artifact = item as Record<string, unknown>;
+    const keys = Object.keys(artifact);
+    const allowed = new Set(["id", "kind", "relativePath", "bytes", "sha256", "mime", "status"]);
+    const suffix = typeof artifact.relativePath === "string" && artifact.relativePath.startsWith(prefix)
+      ? artifact.relativePath.slice(prefix.length) : "";
+    const kindOwnsPath = artifact.kind === "metadata" && suffix === "metadata.json" ||
+      artifact.kind === "video" && suffix === "video.mp4" || artifact.kind === "audio" && /^audio\/[A-Za-z0-9._-]+$/u.test(suffix) ||
+      artifact.kind === "transcript" && suffix === "transcript.json" || artifact.kind === "frame" && /^frames\/[A-Za-z0-9._-]+\.jpe?g$/iu.test(suffix) ||
+      artifact.kind === "comments" && suffix === "comments.json" || artifact.kind === "report" && suffix === "report.json";
+    if (keys.some((key) => !allowed.has(key)) || !["id", "kind", "relativePath", "bytes", "sha256", "status"].every((key) => key in artifact) ||
+        typeof artifact.id !== "string" || !artifact.id || ids.has(artifact.id) ||
+        typeof artifact.kind !== "string" || !DOUYIN_ARTIFACT_KINDS.has(artifact.kind) ||
+        typeof artifact.relativePath !== "string" || !kindOwnsPath ||
+        !Number.isSafeInteger(artifact.bytes) || (artifact.bytes as number) < 1 || (artifact.bytes as number) > MAX_FILE_BYTES ||
+        typeof artifact.sha256 !== "string" || !HASH.test(artifact.sha256) ||
+        !["succeeded", "partial"].includes(String(artifact.status)) ||
+        ("mime" in artifact && typeof artifact.mime !== "string")) throw new Error("抖音证据产物合同无效");
+    ids.add(artifact.id);
+    safeRelativePath(artifact.relativePath);
+    return { path: artifact.relativePath, role: `douyin-${artifact.kind}`, bytes: artifact.bytes as number, sha256: artifact.sha256 };
+  });
+  const frames = record.frames;
+  if (frames !== undefined && (!Array.isArray(frames) || frames.some((frame) => {
+    if (!frame || typeof frame !== "object" || Array.isArray(frame)) return true;
+    const artifactId = (frame as Record<string, unknown>).artifactId;
+    return typeof artifactId !== "string" || !ids.has(artifactId) ||
+      !artifacts.some((artifact) => (artifact as Record<string, unknown>).id === artifactId &&
+        (artifact as Record<string, unknown>).kind === "frame");
+  }))) throw new Error("抖音帧清单引用无效");
+  const transcript = record.transcript;
+  if (transcript !== undefined) {
+    if (!transcript || typeof transcript !== "object" || Array.isArray(transcript)) throw new Error("抖音转写清单合同无效");
+    const item = transcript as Record<string, unknown>;
+    if (Object.keys(item).some((key) => !["status", "textHash", "segments", "missingRanges"].includes(key)) ||
+        typeof item.status !== "string" || typeof item.textHash !== "string" || !HASH.test(item.textHash) ||
+        !Array.isArray(item.segments) || !Array.isArray(item.missingRanges) || item.segments.some((segment) => {
+          if (!segment || typeof segment !== "object" || Array.isArray(segment)) return true;
+          const value = segment as Record<string, unknown>;
+          return Object.keys(value).some((key) => !["id", "startMs", "endMs", "text", "status"].includes(key)) ||
+            typeof value.id !== "string" || !Number.isSafeInteger(value.startMs) || !Number.isSafeInteger(value.endMs) ||
+            (value.startMs as number) < 0 || (value.endMs as number) <= (value.startMs as number) ||
+            typeof value.text !== "string" || typeof value.status !== "string";
+        })) throw new Error("抖音转写清单合同无效");
+  }
+  if (record.comments !== undefined && (!record.comments || typeof record.comments !== "object" ||
+      Array.isArray(record.comments) || (record.comments as Record<string, unknown>).interpretationOnly !== true)) {
+    throw new Error("抖音评论清单必须保持 interpretationOnly");
+  }
+  return files;
+}
 
 function pruneSnapshot(database: Database, projectId: string, videoId: string) {
   database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
@@ -146,10 +246,20 @@ function pruneSnapshot(database: Database, projectId: string, videoId: string) {
     for (const trigger of NO_DELETE_TRIGGERS) database.exec(`DROP TRIGGER ${trigger}`);
     database.prepare("DELETE FROM videos WHERE id<>? OR project_id<>?").run(videoId, projectId);
     database.prepare("DELETE FROM projects WHERE id<>?").run(projectId);
+    const selected = database.prepare("SELECT snapshot_id FROM video_douyin_analysis_selections WHERE video_id=?")
+      .get(videoId) as { snapshot_id: string } | undefined;
+    if (selected) {
+      database.prepare("DELETE FROM video_douyin_analysis_selection_events WHERE video_id=? AND snapshot_id<>?").run(videoId, selected.snapshot_id);
+      database.prepare("DELETE FROM video_douyin_analysis_snapshots WHERE video_id=? AND id<>?").run(videoId, selected.snapshot_id);
+    } else {
+      database.prepare("DELETE FROM video_douyin_analysis_selection_events WHERE video_id=?").run(videoId);
+      database.prepare("DELETE FROM video_douyin_analysis_snapshots WHERE video_id=?").run(videoId);
+    }
     // 已完成项目恢复不续跑旧任务；只保留 FK 所需任务壳，并移除可能含路径或上游响应的载荷。
     database.exec(`
       DELETE FROM jobs WHERE id NOT IN (
         SELECT job_id FROM video_plan_jobs UNION SELECT job_id FROM video_tts_jobs
+        UNION SELECT job_id FROM video_douyin_analysis_jobs
         UNION SELECT job_id FROM video_tts_artifacts UNION SELECT job_id FROM video_image_batch_items WHERE job_id IS NOT NULL
         UNION SELECT job_id FROM video_image_candidates WHERE job_id IS NOT NULL
         UNION SELECT job_id FROM video_render_runs WHERE job_id IS NOT NULL
@@ -210,6 +320,27 @@ function enumerateSnapshot(database: Database, expected?: VideoProjectPackageMan
   for (const item of finals) {
     addFile(files, { path: item.relative_path, role: "final-video", bytes: item.bytes, sha256: item.file_hash });
     addFile(files, { path: item.manifest_relative_path, role: "final-manifest", bytes: item.manifest_bytes, sha256: item.manifest_hash });
+  }
+  const douyin = database.prepare(`
+    SELECT snapshot.id,snapshot.evidence_hash,snapshot.report_hash,snapshot.source_text,snapshot.config_json,snapshot.report_json,
+           snapshot.artifact_manifest_json,snapshot.model_snapshot_json
+    FROM video_douyin_analysis_selections selection
+    JOIN video_douyin_analysis_snapshots snapshot ON snapshot.id=selection.snapshot_id AND snapshot.video_id=selection.video_id
+    WHERE selection.video_id=?
+  `).get(project.videoId) as { id: string; evidence_hash: string | null; report_hash: string | null; source_text: string; config_json: string;
+    report_json: string | null; artifact_manifest_json: string | null; model_snapshot_json: string | null } | undefined;
+  if (douyin) {
+    if (!douyin.evidence_hash || !douyin.report_hash || !douyin.report_json || !douyin.artifact_manifest_json) {
+      throw new Error("当前抖音分析选择缺少冻结证据或报告");
+    }
+    assertNoSecrets(douyin.source_text, "抖音来源文本");
+    for (const [label, json] of [["抖音分析配置", douyin.config_json], ["抖音分析报告", douyin.report_json],
+      ["抖音模型快照", douyin.model_snapshot_json]] as const) {
+      if (json) { try { assertNoSecrets(JSON.parse(json), label); } catch (error) {
+        if (error instanceof SyntaxError) throw new Error(`${label}不是有效 JSON`); throw error;
+      } }
+    }
+    addRows(parseDouyinManifest(douyin.artifact_manifest_json, project.videoId, douyin.id, douyin.evidence_hash));
   }
   return { project, files: [...files.values()].sort((a, b) => a.path.localeCompare(b.path, "en")) };
 }
@@ -279,6 +410,7 @@ export async function createVideoProjectPackage(database: Database, dataRootValu
     const databaseMeasured = await measureOrdinary(databasePath);
     const files: PackageFile[] = [{ path: "yingshu.sqlite3", role: "database", bytes: databaseMeasured.bytes, sha256: databaseMeasured.sha256 }];
     for (const file of enumerated.files) {
+      await assertSafeDouyinJson(dataRoot, file);
       const measured = await copyVerified(dataRoot, file.path, controlled(resolve(staging, "payload"), file.path), file);
       files.push({ ...file, ...measured });
     }
@@ -312,7 +444,10 @@ export async function restoreVideoProjectPackage(packagePathValue: string, targe
   const staging = `${target}.tmp-${randomUUID()}`;
   await mkdir(staging, { recursive: true });
   try {
-    for (const file of manifest.files) await copyVerified(payload, file.path, controlled(staging, file.path), file);
+    for (const file of manifest.files) {
+      await copyVerified(payload, file.path, controlled(staging, file.path), file);
+      await assertSafeDouyinJson(staging, file);
+    }
     const restoredDatabase = new DatabaseSync(controlled(staging, "yingshu.sqlite3"), { readOnly: true });
     try {
       const enumerated = enumerateSnapshot(restoredDatabase, manifest.project);

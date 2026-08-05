@@ -91,19 +91,73 @@ async function fixture() {
     manifest_relative_path,manifest_bytes,manifest_hash,ffmpeg_version,created_at)
     VALUES ('final','run','project','video',?,?,?,?,'{}',?,?,?,'ffmpeg',1)`).run(X("d"), final.path, final.bytes, final.hash,
       manifest.path, manifest.bytes, manifest.hash);
-  return { root, dataRoot, connection };
+  const metadata = await put(dataRoot, "douyin/analyses/video/snapshot/metadata.json", "{\"awemeId\":\"12345\"}");
+  const transcript = await put(dataRoot, "douyin/analyses/video/snapshot/transcript.json", "{\"text\":\"转写\"}");
+  const comments = await put(dataRoot, "douyin/analyses/video/snapshot/comments.json", "{\"interpretationOnly\":true}");
+  const report = await put(dataRoot, "douyin/analyses/video/snapshot/report.json", "{\"version\":\"yingshu-douyin-analysis-v1\"}");
+  const artifacts = [metadata, transcript, comments, report].map((item) => ({
+    id: item.path.split("/").at(-1)!,
+    kind: item.path.includes("metadata") ? "metadata" : item.path.includes("transcript") ? "transcript" :
+      item.path.includes("comments") ? "comments" : "report",
+    relativePath: item.path, bytes: item.bytes, sha256: item.hash, status: "succeeded",
+  }));
+  const evidenceHash = X("0");
+  const reportHash = X("1");
+  db.prepare(`INSERT INTO video_douyin_analysis_snapshots
+    (id,video_id,aweme_id,source_url,source_text,config_json,config_hash,evidence_hash,report_json,report_hash,status,completeness,
+     artifact_manifest_json,model_snapshot_json,prompt_version,created_at,completed_at)
+    VALUES ('snapshot','video','12345','https://www.douyin.com/video/12345','https://v.douyin.com/test/', '{}',?,?,?,?,
+      'succeeded','complete',?,'{\"provider\":\"fixture\",\"model\":\"fixture\"}','v1',2,3)`)
+    .run(X("2"), evidenceHash, JSON.stringify({ version: "yingshu-douyin-analysis-v1" }), reportHash,
+      JSON.stringify({ version: "yingshu-douyin-evidence-v1", evidenceHash, artifacts }));
+  db.prepare(`INSERT INTO video_douyin_analysis_selections
+    (video_id,snapshot_id,usage_role,creative_angle,rights_confirmed,updated_at)
+    VALUES ('video','snapshot','method_only','',0,3)`).run();
+  return { root, dataRoot, connection, artifacts, evidenceHash };
 }
 
-test("v25 Video 项目包只恢复目标视频和数据库登记文件", async () => {
+test("v26 Video 项目包恢复当前抖音证据且排除缓存和秘密", async () => {
   const value = await fixture();
   try {
     const packagePath = join(value.root, "package");
+    await put(value.dataRoot, "douyin/cache/12345/video.mp4", "cache");
+    await put(value.dataRoot, "douyin/cookies.json", "secret-cookie");
+    const originalManifest = JSON.parse((value.connection.database.prepare(
+      "SELECT artifact_manifest_json FROM video_douyin_analysis_snapshots WHERE id='snapshot'",
+    ).get() as { artifact_manifest_json: string }).artifact_manifest_json) as Record<string, unknown>;
+    value.connection.database.prepare(
+      "UPDATE video_douyin_analysis_snapshots SET artifact_manifest_json=? WHERE id='snapshot'",
+    ).run(JSON.stringify({ ...originalManifest, cookie: "secret-cookie" }));
+    await assert.rejects(createVideoProjectPackage(value.connection.database, value.dataRoot, {
+      packagePath, projectId: "project", videoId: "video", finalVideoId: "final",
+    }), /证据清单合同无效|秘密/u);
+    value.connection.database.prepare(
+      "UPDATE video_douyin_analysis_snapshots SET artifact_manifest_json=? WHERE id='snapshot'",
+    ).run(JSON.stringify(originalManifest));
+    const metadataPath = join(value.dataRoot, "douyin/analyses/video/snapshot/metadata.json");
+    const secretMetadata = JSON.stringify({ downloadUrl: "https://secret.invalid/video" });
+    await writeFile(metadataPath, secretMetadata);
+    const secretArtifacts = (originalManifest.artifacts as Array<Record<string, unknown>>).map((artifact) =>
+      artifact.kind === "metadata" ? { ...artifact, bytes: Buffer.byteLength(secretMetadata), sha256: H(secretMetadata) } : artifact);
+    value.connection.database.prepare(
+      "UPDATE video_douyin_analysis_snapshots SET artifact_manifest_json=? WHERE id='snapshot'",
+    ).run(JSON.stringify({ ...originalManifest, artifacts: secretArtifacts }));
+    await assert.rejects(createVideoProjectPackage(value.connection.database, value.dataRoot, {
+      packagePath, projectId: "project", videoId: "video", finalVideoId: "final",
+    }), /秘密字段/u);
+    await writeFile(metadataPath, "{\"awemeId\":\"12345\"}");
+    value.connection.database.prepare(
+      "UPDATE video_douyin_analysis_snapshots SET artifact_manifest_json=? WHERE id='snapshot'",
+    ).run(JSON.stringify(originalManifest));
     const created = await createVideoProjectPackage(value.connection.database, value.dataRoot, {
       packagePath, projectId: "project", videoId: "video", finalVideoId: "final",
     });
     assert.deepEqual(new Set(created.manifest.files.map((file) => file.role)), new Set([
       "database", "approved-image", "tts-audio", "subtitle-srt", "subtitle-ass", "render-chunk", "final-video", "final-manifest",
+      "douyin-metadata", "douyin-transcript", "douyin-comments", "douyin-report",
     ]));
+    assert.equal(created.manifest.schemaVersion, 26);
+    assert.equal(created.manifest.files.some((file) => file.path.includes("cache") || file.path.includes("cookie")), false);
     const restored = join(value.root, "restored");
     await restoreVideoProjectPackage(packagePath, restored);
     const database = new DatabaseSync(join(restored, "yingshu.sqlite3"), { readOnly: true });
@@ -112,7 +166,18 @@ test("v25 Video 项目包只恢复目标视频和数据库登记文件", async (
       assert.deepEqual(database.prepare("SELECT id FROM videos").all().map((row) => ({ ...row })), [{ id: "video" }]);
       assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0);
       assert.equal((database.prepare("SELECT payload_json FROM jobs WHERE id='tts-job'").get() as { payload_json: string }).payload_json, "{}");
+      assert.deepEqual({ ...database.prepare(
+        "SELECT snapshot_id,usage_role FROM video_douyin_analysis_selections WHERE video_id='video'",
+      ).get() }, { snapshot_id: "snapshot", usage_role: "method_only" });
+      assert.deepEqual({ ...database.prepare(
+        "SELECT evidence_hash,report_hash FROM video_douyin_analysis_snapshots WHERE id='snapshot'",
+      ).get() }, { evidence_hash: value.evidenceHash, report_hash: X("1") });
     } finally { database.close(); }
+    for (const artifact of value.artifacts) {
+      assert.equal(H(await readFile(join(restored, ...artifact.relativePath.split("/")))), artifact.sha256);
+    }
+    await assert.rejects(readFile(join(restored, "douyin/cache/12345/video.mp4")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(restored, "douyin/cookies.json")), { code: "ENOENT" });
     assert.equal(await readFile(join(restored, "projects/project/videos/video/final/video.mp4"), "utf8"), "video");
     await writeFile(join(packagePath, "payload/projects/project/videos/video/final/video.mp4"), "tampered");
     await assert.rejects(restoreVideoProjectPackage(packagePath, join(value.root, "tampered")), /哈希不一致|大小受限/u);
