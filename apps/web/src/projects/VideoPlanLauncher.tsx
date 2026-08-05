@@ -4,13 +4,17 @@ import {
 } from "../components/ui/alert-dialog";
 import { Button } from "../components/ui/button";
 import { validateVideoInput } from "./input-logic";
-import type { VideoInputDraft } from "./types";
+import type { VideoInputDraft, VideoPlanEntryMode } from "./types";
 
-export function videoPlanLaunchBlockReason(input: VideoInputDraft, dirty: boolean, busy: boolean, modelAvailable: boolean) {
+export function videoPlanLaunchBlockReason(input: VideoInputDraft, dirty: boolean, busy: boolean, modelAvailable: boolean,
+  entryMode: VideoPlanEntryMode = "primary_input", entryBlockReason: string | null = null) {
   if (busy) return "正在处理当前操作，请稍候。";
-  if (dirty) return "请先保存当前修改，再生成方案。";
-  try { validateVideoInput(input); }
-  catch (error) { return error instanceof Error ? `${error.message}。` : "当前输入无效，请检查后重试。"; }
+  if (dirty) return "正在自动保存当前修改，请稍候。";
+  if (entryBlockReason) return entryBlockReason;
+  if (entryMode === "primary_input") {
+    try { validateVideoInput(input); }
+    catch (error) { return error instanceof Error ? `${error.message}。` : "当前输入无效，请检查后重试。"; }
+  }
   return modelAvailable ? null : "请先在设置中配置可用的文本模型。";
 }
 
@@ -24,15 +28,18 @@ export function videoPlanLaunchConfirmation(input: VideoInputDraft, modelLabel: 
   };
 }
 
-export function VideoPlanLauncher({ input, dirty, busy, modelLabel, modelAvailable, onStart }: {
+export function VideoPlanLauncher({ input, dirty, busy, modelLabel, modelAvailable, entryMode = "primary_input",
+  entryBlockReason = null, onStart }: {
   input: VideoInputDraft;
   dirty: boolean;
   busy: boolean;
   modelLabel: string;
   modelAvailable: boolean;
+  entryMode?: VideoPlanEntryMode;
+  entryBlockReason?: string | null;
   onStart: () => void;
 }) {
-  const disabled = Boolean(videoPlanLaunchBlockReason(input, dirty, busy, modelAvailable));
+  const disabled = Boolean(videoPlanLaunchBlockReason(input, dirty, busy, modelAvailable, entryMode, entryBlockReason));
   const confirmation = videoPlanLaunchConfirmation(input, modelLabel);
   return <AlertDialog>
     <AlertDialogTrigger asChild>

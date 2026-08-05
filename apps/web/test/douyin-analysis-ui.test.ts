@@ -6,10 +6,10 @@ import { renderToString } from "react-dom/server";
 
 import { projectApi } from "../src/projects/api.ts";
 import {
-  acceptedMissingDimensions, DOUYIN_STATUS_LABELS, douyinStatusMessage, evidenceRows, unavailableDimensions, usageRoleLabel,
+  acceptedMissingDimensions, canSaveDouyinSelection, DOUYIN_STATUS_LABELS, douyinPlanLaunchBlockReason, douyinStatusMessage, evidenceRows, unavailableDimensions, usageRoleLabel,
   validateDouyinDraft,
 } from "../src/projects/douyin-analysis/logic.ts";
-import { DEFAULT_DOUYIN_ANALYSIS_CONFIG, type DouyinAvailabilityDimension } from "../src/projects/douyin-analysis/types.ts";
+import { DEFAULT_DOUYIN_ANALYSIS_CONFIG, type DouyinAnalysisSummary, type DouyinAvailabilityDimension } from "../src/projects/douyin-analysis/types.ts";
 import { VideoInputContent } from "../src/projects/VideoInputStage.tsx";
 import type { VideoInputDraft } from "../src/projects/types.ts";
 
@@ -69,12 +69,61 @@ test("抖音分析 API 使用视频嵌套路由、严格配置和 selection 请�
   } finally { globalThis.fetch = previous; }
 });
 
-test("输入与来源编排抖音面板时保留原主题正文草稿", () => {
+test("抖音创作保留为独立输入方式且不在默认主题模式下追加面板", () => {
   const draft: VideoInputDraft = { inputMode: "topic", topic: "保留主题", body: "保留正文", referenceText: "", referenceRole: "style_only", targetDurationSeconds: 180, visualDensity: "standard", webEnabled: true, scriptInstructions: "", visualInstructions: "", updatedAt: 1 };
   const html = renderToString(createElement(VideoInputContent, { state: { draft, setDraft: () => undefined, loaded: true, busy: false, dirty: false, status: "已加载", error: false, save: async () => undefined }, douyinPanel: createElement("section", { "data-testid": "douyin-panel" }, "抖音视频分析") }));
   assert.match(html, /保留主题/);
-  assert.match(html, /抖音视频分析/);
-  assert.match(html, /data-testid="douyin-panel"/);
+  assert.match(html, /根据主题创作/);
+  assert.match(html, /根据正文改编/);
+  assert.match(html, /根据抖音视频创作/);
+  assert.match(html, /根据知乎链接创作/);
+  assert.doesNotMatch(html, /data-testid="douyin-panel"/);
+
+  const source = readFileSync(new URL("../src/projects/VideoInputStage.tsx", import.meta.url), "utf8");
+  const panelSource = readFileSync(new URL("../src/projects/douyin-analysis/DouyinAnalysisPanel.tsx", import.meta.url), "utf8");
+  const hookSource = readFileSync(new URL("../src/projects/douyin-analysis/use-douyin-analysis.ts", import.meta.url), "utf8");
+  assert.match(source, /creativeInputMode === "douyin"/u);
+  assert.match(source, /douyinPanel/u);
+  assert.match(source, /next !== "douyin" && next !== "zhihu"/u);
+  assert.match(source, /selectedCreativeInputMode[\s\S]*\?\? state\.draft\?\.inputMode \?\? "topic"/u);
+  assert.match(source, /grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4/u);
+  assert.doesNotMatch(source, /\n\s*\{douyinPanel\}\s*\n/u);
+  assert.match(source, /!planState\.plan \|\| planState\.plan\.stale/u);
+  assert.doesNotMatch(source + panelSource, /保存制作设置|保存分析配置|保存使用方式/u);
+  assert.match(hookSource, /停止修改后自动保存|正在自动保存/u);
+  assert.match(hookSource, /useState<DouyinUsageRole>\(\)/u);
+  assert.match(hookSource, /failedSelectionValueRef\.current === value/u);
+  assert.match(hookSource, /selectionSaveBlocked/u);
+  assert.match(hookSource, /selection: response\.selection/u);
+  assert.match(source, /useDouyinAnalysis\([\s\S]*state\.dirty \|\| state\.busy/u);
+});
+
+test("抖音入口按当前快照、已保存使用方式和角色阻断生成", () => {
+  const input: VideoInputDraft = { inputMode: "topic", topic: "", body: "", referenceText: "", referenceRole: "style_only", targetDurationSeconds: 180, visualDensity: "standard", webEnabled: true, scriptInstructions: "", visualInstructions: "", updatedAt: 1 };
+  const state = { loaded: true, busy: false, selectionDirty: false, error: false };
+  assert.match(douyinPlanLaunchBlockReason(input, state) ?? "", /先完成抖音视频分析/u);
+
+  const snapshot = { id: "snapshot_1", status: "succeeded", config: DEFAULT_DOUYIN_ANALYSIS_CONFIG };
+  const summary = { snapshot, job: null, selection: null } as unknown as DouyinAnalysisSummary;
+  assert.match(douyinPlanLaunchBlockReason(input, { ...state, summary }) ?? "", /选择抖音使用方式/u);
+
+  const selected = (usageRole: "method_only" | "topic_seed" | "content_source") => ({ ...summary,
+    selection: { videoId: "video_1", snapshotId: snapshot.id, usageRole, creativeAngle: "", rightsConfirmed: false, updatedAt: 2 },
+  }) as DouyinAnalysisSummary;
+  assert.match(douyinPlanLaunchBlockReason(input, { ...state, summary: selected("method_only") }) ?? "", /仍需要基础主题或正文/u);
+  assert.equal(douyinPlanLaunchBlockReason(input, { ...state, summary: selected("topic_seed") }), null);
+  assert.equal(douyinPlanLaunchBlockReason(input, { ...state, summary: selected("content_source") }), null);
+  assert.match(douyinPlanLaunchBlockReason(input, { ...state, selectionDirty: true, summary: selected("topic_seed") }) ?? "", /正在自动保存/u);
+});
+
+test("保存抖音使用方式复用服务端 readiness 并保留部分结果与权利门禁", () => {
+  const base = { busy: false, selectionDirty: true, acceptPartial: false,
+    usageRole: "topic_seed" as const, rightsConfirmed: false };
+  const summary = (status: "failed" | "succeeded", selectUsage: boolean) => ({
+    snapshot: { id: "snapshot_1", status }, allowedActions: { selectUsage },
+  }) as unknown as DouyinAnalysisSummary;
+  assert.equal(canSaveDouyinSelection({ ...base, summary: summary("failed", false) }), false);
+  assert.equal(canSaveDouyinSelection({ ...base, summary: summary("succeeded", true) }), true);
 });
 
 test("Task 8 面板静态边界包含移动列表、桌面表格、返焦和单层焦点复用", () => {

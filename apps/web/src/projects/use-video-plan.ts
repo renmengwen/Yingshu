@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { activeModelLabel, loadModelConfig } from "../settings/model-settings";
 import { projectApi } from "./api";
 import { canCancelPlanJob, type PlanActionState } from "./plan-logic";
-import type { Video, VideoPlan, VideoPlanJob, VideoPlanSource, VideoScriptParagraph, VideoVisualDraft } from "./types";
+import type { Video, VideoPlan, VideoPlanEntryMode, VideoPlanJob, VideoPlanSource, VideoScriptParagraph, VideoVisualDraft } from "./types";
 
 export function useVideoPlan(projectId: string, videoId: string) {
   const [plan, setPlan] = useState<VideoPlan | null>(null);
@@ -89,8 +89,8 @@ export function useVideoPlan(projectId: string, videoId: string) {
     }
   }
 
-  const start = () => perform("正在创建方案任务并冻结本次生成输入…", async () => {
-    const body = await projectApi.createPlanJob(projectId, videoId, crypto.randomUUID());
+  const start = (entryMode: VideoPlanEntryMode = "primary_input") => perform("正在创建方案任务并冻结本次生成输入…", async () => {
+    const body = await projectApi.createPlanJob(projectId, videoId, crypto.randomUUID(), entryMode);
     setJob({ ...body.job, errorMessage: null });
     setVideoStatus(body.videoStatus);
     return body;

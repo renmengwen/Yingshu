@@ -93,7 +93,7 @@ export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVi
         {canCancelPlanJob(state.job) ? <Button className="mt-4" variant="outline" type="button" disabled={state.busy} onClick={() => void state.cancel()}>{state.busy ? "正在处理中…" : "中断生成"}</Button> : null}
       </section> : null}
 
-      {!plan && state.loaded && !state.job ? <div className="mt-8 border-y border-[var(--border-subtle)] py-10 text-center"><p className="text-sm text-[var(--fg-secondary)]">尚无可审核方案。返回输入阶段保存草稿后创建任务。</p></div> : null}
+      {!plan && state.loaded && !state.job ? <div className="mt-8 border-y border-[var(--border-subtle)] py-10 text-center"><p className="text-sm text-[var(--fg-secondary)]">尚无可审核方案。返回输入阶段完善内容，等待自动保存后创建任务。</p></div> : null}
 
       {plan ? <div className="mt-6 grid gap-8">
         <PlanOverview plan={plan} sourceCount={state.sources.length} incompatible={incompatible} />

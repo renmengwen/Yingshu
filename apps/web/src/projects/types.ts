@@ -13,12 +13,24 @@ export interface Video {
   id: string;
   projectId: string;
   title: string;
-  status: "draft" | "preparing_sources" | "generating_script" | "planning_visuals" | "awaiting_review" | "producing_media" | "awaiting_media_review" | "rendering" | "completed" | "failed" | "cancelled";
+  status:
+    | "draft"
+    | "preparing_sources"
+    | "generating_script"
+    | "planning_visuals"
+    | "awaiting_review"
+    | "producing_media"
+    | "awaiting_media_review"
+    | "rendering"
+    | "completed"
+    | "failed"
+    | "cancelled";
   createdAt: number;
   updatedAt: number;
 }
 
-export type VideoPlanJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type VideoPlanJobStatus =
+  "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface VideoPlanJob {
   id: string;
@@ -98,6 +110,7 @@ export interface ProjectCreativeSettings {
 }
 
 export type InputMode = "topic" | "body";
+export type VideoPlanEntryMode = "primary_input" | "douyin" | "zhihu";
 export type ReferenceRole = "style_only" | "content_source";
 export type VisualDensity = "relaxed" | "standard" | "compact";
 

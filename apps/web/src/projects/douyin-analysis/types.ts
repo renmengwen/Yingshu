@@ -82,6 +82,8 @@ export interface DouyinAnalysisSelectionInput {
   acceptedMissingDimensions: DouyinAcceptedMissingDimension[];
 }
 
+export interface DouyinAnalysisSelectionResponse { ok: true; message: string; selection: DouyinSelection }
+
 export interface DouyinReportResponse { ok: true; report: unknown }
 export interface DouyinTranscriptResponse { ok: true; transcript: unknown }
 export interface DouyinFramesResponse { ok: true; items: unknown[] }

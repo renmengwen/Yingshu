@@ -29,7 +29,7 @@ export function validateProjectSettings(input: Pick<ProjectCreativeSettings, "sc
   };
 }
 
-export function validateVideoInput(input: VideoInputDraft): Omit<VideoInputDraft, "updatedAt"> {
+export function validateVideoInput(input: VideoInputDraft, options: { allowEmptyPrimary?: boolean } = {}): Omit<VideoInputDraft, "updatedAt"> {
   if (input.inputMode !== "topic" && input.inputMode !== "body") throw new Error("输入模式无效，请重新选择");
   if (input.referenceRole !== "style_only" && input.referenceRole !== "content_source") throw new Error("参考文本角色无效，请重新选择");
   if (!(["relaxed", "standard", "compact"] as const).includes(input.visualDensity)) throw new Error("画面密度无效，请重新选择");
@@ -41,8 +41,8 @@ export function validateVideoInput(input: VideoInputDraft): Omit<VideoInputDraft
   const topic = input.topic.normalize("NFKC").trim().replace(/\s+/gu, " ");
   const body = normalizeOptional(input.body);
   const referenceText = normalizeOptional(input.referenceText);
-  if (input.inputMode === "topic" && !topic) throw new Error("请输入视频主题");
-  if (input.inputMode === "body" && !body) throw new Error("请粘贴视频正文");
+  if (!options.allowEmptyPrimary && input.inputMode === "topic" && !topic) throw new Error("请输入视频主题");
+  if (!options.allowEmptyPrimary && input.inputMode === "body" && !body) throw new Error("请粘贴视频正文");
   if (codePointLength(topic) > INPUT_LIMITS.topicCodePoints) throw new Error(`视频主题不能超过${INPUT_LIMITS.topicCodePoints}个字符`);
   if (byteLength(body) > INPUT_LIMITS.bodyBytes) throw new Error("视频正文不能超过128KiB（按UTF-8计算）");
   if (byteLength(referenceText) > INPUT_LIMITS.referenceBytes) throw new Error("参考文本不能超过64KiB（按UTF-8计算）");

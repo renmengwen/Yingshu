@@ -114,10 +114,10 @@ test("生成入口保持单一主操作并在输入可用时允许打开确认�
   assert.doesNotMatch(html, /disabled=""/);
 });
 
-test("生成入口统一阻止无效输入、未保存修改、处理中状态和缺失模型", () => {
+test("生成入口统一阻止无效输入、自动保存中、处理中状态和缺失模型", () => {
   assert.match(videoPlanLaunchBlockReason(input({ topic: "" }), false, false, true) ?? "", /请输入视频主题/);
   assert.match(videoPlanLaunchBlockReason(input({ inputMode: "body", body: "" }), false, false, true) ?? "", /请粘贴视频正文/);
-  assert.match(videoPlanLaunchBlockReason(input(), true, false, true) ?? "", /先保存/);
+  assert.match(videoPlanLaunchBlockReason(input(), true, false, true) ?? "", /正在自动保存/);
   assert.match(videoPlanLaunchBlockReason(input(), false, true, true) ?? "", /正在处理/);
   assert.match(videoPlanLaunchBlockReason(input(), false, false, false) ?? "", /配置可用的文本模型/);
   assert.equal(videoPlanLaunchBlockReason(input(), false, false, true), null);
@@ -175,8 +175,12 @@ test("方案 API 使用视频嵌套路由和冻结请求体", async () => {
   }) as typeof fetch;
   try {
     await projectApi.createPlanJob("项目/一", "视频?二", "once-1");
+    await projectApi.createPlanJob("项目/一", "视频?二", "once-2", "douyin");
+    await projectApi.createPlanJob("项目/一", "视频?二", "once-3", "zhihu");
     assert.equal(calls[0]?.url, "/api/projects/%E9%A1%B9%E7%9B%AE%2F%E4%B8%80/videos/%E8%A7%86%E9%A2%91%3F%E4%BA%8C/plan-jobs");
-    assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { idempotencyKey: "once-1" });
+    assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { idempotencyKey: "once-1", entryMode: "primary_input" });
+    assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { idempotencyKey: "once-2", entryMode: "douyin" });
+    assert.deepEqual(JSON.parse(String(calls[2]?.init?.body)), { idempotencyKey: "once-3", entryMode: "zhihu" });
     assert.equal(calls[0]?.init?.method, "POST");
   } finally {
     globalThis.fetch = previous;

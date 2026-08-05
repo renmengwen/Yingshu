@@ -2,6 +2,50 @@ import type {
   DouyinAcceptedMissingDimension, DouyinAnalysisConfig, DouyinAnalysisStatus, DouyinAvailabilityDimension,
   DouyinEvidenceSummary, DouyinUsageRole,
 } from "./types";
+import { validateVideoInput } from "../input-logic";
+import type { VideoInputDraft } from "../types";
+
+export function douyinPlanLaunchBlockReason(input: VideoInputDraft, state: {
+  loaded: boolean;
+  busy: boolean;
+  selectionDirty: boolean;
+  error: boolean;
+  summary?: import("./types").DouyinAnalysisSummary;
+}) {
+  if (!state.loaded) return "正在恢复抖音分析与使用方式，请稍候。";
+  if (state.busy) return "正在处理抖音分析操作，请稍候。";
+  if (state.error) return "抖音分析状态存在错误，请先按页面提示处理。";
+  const snapshot = state.summary?.snapshot;
+  if (!snapshot) return "请先完成抖音视频分析。";
+  if (state.summary?.job && ["queued", "running"].includes(state.summary.job.status)) {
+    return "抖音视频正在分析，请等待任务完成。";
+  }
+  if (snapshot.status !== "succeeded" && snapshot.status !== "partial") {
+    return "当前抖音分析尚不可用于创作，请重新分析。";
+  }
+  const selection = state.summary?.selection;
+  if (!selection || selection.snapshotId !== snapshot.id) return "请选择抖音使用方式，系统会自动保存。";
+  if (state.selectionDirty) return "抖音使用方式正在自动保存，请稍候。";
+  if (selection.usageRole === "method_only") {
+    try { validateVideoInput(input); }
+    catch { return "只参考创作方法仍需要基础主题或正文，请先填写。"; }
+  }
+  return null;
+}
+
+export function canSaveDouyinSelection(state: {
+  busy: boolean;
+  selectionDirty: boolean;
+  acceptPartial: boolean;
+  usageRole?: DouyinUsageRole;
+  rightsConfirmed: boolean;
+  summary?: import("./types").DouyinAnalysisSummary;
+}) {
+  const snapshot = state.summary?.snapshot;
+  return Boolean(!state.busy && state.selectionDirty && state.usageRole && snapshot && state.summary?.allowedActions.selectUsage &&
+    (snapshot.status !== "partial" || state.acceptPartial) &&
+    (state.usageRole !== "content_source" || state.rightsConfirmed));
+}
 
 export function validateDouyinDraft(config: DouyinAnalysisConfig) {
   if (!config.sourceText.trim()) return "请粘贴抖音分享文案、短链接或完整视频链接。";

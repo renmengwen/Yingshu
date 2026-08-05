@@ -67,7 +67,7 @@ export function VideoProductionSettingsDialog({ disabled, settings, onApply }: V
       <DialogContent aria-describedby="video-production-settings-description">
         <DialogHeader>
           <DialogTitle>编辑制作设置</DialogTitle>
-          <DialogDescription id="video-production-settings-description">这些设置只影响当前视频，并随方案一起冻结。应用后仍需在主页面保存草稿。</DialogDescription>
+          <DialogDescription id="video-production-settings-description">这些设置只影响当前视频，并随方案一起冻结。应用后会在主页面自动保存。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-6 p-5 sm:p-6">
           <div className="grid gap-6 sm:grid-cols-2">
