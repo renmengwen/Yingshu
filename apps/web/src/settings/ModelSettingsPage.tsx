@@ -4,6 +4,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "../components/ui/alert-dialog";
+import { NativeSelect, NativeSelectOption } from "../components/ui/native-select";
 import {
   ASR_PROTOCOLS,
   activeModelLabel,
@@ -178,18 +179,18 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
         </nav>
 
         {section === "models" ? <section className="grid grid-cols-[240px_minmax(0,1fr)] gap-0 px-7 py-6 max-lg:grid-cols-1 max-md:px-4">
-          <aside className="border-r border-[var(--border-subtle)] pr-4 max-lg:border-r-0 max-lg:pr-0">
+          <aside className="min-w-0 border-r border-[var(--border-subtle)] pr-4 max-lg:border-r-0 max-lg:pr-0">
             <p className="mb-3 font-mono text-[11px] font-semibold tracking-[.17em] text-[var(--fg-tertiary)]">供应商</p>
             <button type="button" disabled={!config || loading || saving} onClick={addProvider} className="mb-3 min-h-11 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm font-semibold hover:bg-[var(--bg-subtle)] disabled:opacity-50">添加供应商</button>
-            <div className="grid gap-2 max-lg:grid-cols-2 max-sm:grid-cols-1">
+            <div className="grid min-w-0 gap-2 max-lg:grid-cols-2 max-sm:grid-cols-1">
               {providers.map((provider) => (
                 <button
                   key={provider.id}
                   type="button"
-                  className={`min-h-16 rounded border px-3 py-2 text-left text-sm ${provider.id === selectedProvider?.id ? "border-[var(--border-strong)] bg-[var(--accent-soft)]" : "border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)]"}`}
+                  className={`min-h-16 w-full min-w-0 overflow-hidden rounded border px-3 py-2 text-left text-sm ${provider.id === selectedProvider?.id ? "border-[var(--border-strong)] bg-[var(--accent-soft)]" : "border-[var(--border-subtle)] hover:bg-[var(--bg-subtle)]"}`}
                   onClick={() => setSelectedProviderId(provider.id)}
                 >
-                  <strong className="block">{provider.name}</strong>
+                  <strong className="block truncate">{provider.name}</strong>
                   <span className="mt-1 block font-mono text-[11px] text-[var(--fg-tertiary)]">{provider.kind === "edge-tts" ? "内置默认" : provider.hasApiKey ? "已保存密钥" : "待配置"}</span>
                   <span className="mt-1 block truncate text-xs text-[var(--fg-secondary)]">{enabledModelSummary(provider)}</span>
                 </button>
@@ -207,15 +208,15 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
                   </div>
                   <div className="grid grid-cols-4 max-xl:grid-cols-2 max-lg:grid-cols-1">
                     {MODEL_TYPES.map((type) => (
-                      <label key={type} className="grid gap-2 border-r border-[var(--border-subtle)] p-4 last:border-r-0 max-lg:border-b max-lg:border-r-0 max-lg:last:border-b-0">
+                      <label key={type} className="grid min-w-0 gap-2 border-r border-[var(--border-subtle)] p-4 last:border-r-0 max-lg:border-b max-lg:border-r-0 max-lg:last:border-b-0">
                         <span className="text-xs font-semibold text-[var(--fg-tertiary)]">{MODEL_TYPE_LABELS[type]}</span>
-                        <select className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={config.active[type] ?? ""} onChange={(event) => setActive(type, event.target.value)}>
-                          <option value="">未配置</option>
+                        <NativeSelect wrapperClassName="w-full min-w-0" value={config.active[type] ?? ""} onChange={(event) => setActive(type, event.target.value)}>
+                          <NativeSelectOption value="">未配置</NativeSelectOption>
                           {providers.flatMap((provider) => {
                             const model = provider.models[type];
-                            return [<option key={`${provider.id}/${type}`} disabled={!model?.enabled || !model.modelId} value={`${provider.id}/${type}`}>{provider.kind === "edge-tts" ? `${provider.name} / ${model?.voiceLabel || model?.voiceId || model?.modelId || "未配置"}` : `${provider.name} / ${model?.modelId || "未配置"}`}</option>];
+                            return [<NativeSelectOption key={`${provider.id}/${type}`} disabled={!model?.enabled || !model.modelId} value={`${provider.id}/${type}`}>{provider.kind === "edge-tts" ? `${provider.name} / ${model?.voiceLabel || model?.voiceId || model?.modelId || "未配置"}` : `${provider.name} / ${model?.modelId || "未配置"}`}</NativeSelectOption>];
                           })}
-                        </select>
+                        </NativeSelect>
                         <span className="truncate font-mono text-[11px] text-[var(--fg-tertiary)]">{activeModelLabel(config, type)}</span>
                         {type === "asr" ? <span className="text-xs text-[var(--fg-secondary)]">
                           {config.runtimeCapabilities?.asr.configured

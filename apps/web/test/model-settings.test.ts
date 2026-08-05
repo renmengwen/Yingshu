@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -126,6 +127,15 @@ test("模型设置将 ASR 作为同一供应商下的第四种模式", () => {
   assert.equal(custom.models.asr.maxRequestBytes, 10 * 1024 * 1024);
   assert.equal(custom.models.asr.segmentDurationSeconds, 180);
   assert.equal(activeModelLabel(active, "asr"), "新供应商 / whisper-1");
+});
+
+test("模型设置的长名称不会撑破供应商列表或默认模型网格", () => {
+  const page = readFileSync(new URL("../src/settings/ModelSettingsPage.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /min-h-16 w-full min-w-0 overflow-hidden/u);
+  assert.match(page, /<strong className="block truncate">/u);
+  assert.match(page, /className="grid min-w-0 gap-2/u);
+  assert.match(page, /<NativeSelect wrapperClassName="w-full min-w-0"/u);
 });
 
 test("全局创作补充按 Unicode code point 校验并统一换行", () => {
