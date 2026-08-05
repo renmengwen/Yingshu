@@ -10,6 +10,7 @@ import {
   modelConfigPath,
   readModelConfig,
   resolveRuntimeModelConfig,
+  resolveRuntimeModelCapability,
   toPublicModelConfig,
   writeModelConfig,
 } from "./model-config.js";
@@ -62,6 +63,7 @@ test("已排队任务可按冻结 provider/model 解析配置，不受 active �
       text: { enabled: true, modelId: "first-model", note: "" },
       image: { enabled: false, modelId: "", note: "" },
       tts: { enabled: false, modelId: "", note: "" },
+      asr: { enabled: false, modelId: "", note: "" },
     },
   };
   config.providers.second = {
@@ -157,6 +159,70 @@ test("模型配置保存 MuseDock 兼容的 protocol 与按模式字段", async 
   }
 });
 
+test("ASR 复用同一供应商配置并提供非秘密运行时身份", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-model-config-asr-"));
+  try {
+    const saved = await writeModelConfig(dataRoot, {
+      providers: {
+        mimo: {
+          name: "MiMo",
+          kind: "mimo",
+          baseUrl: "https://api.xiaomimimo.com/v1/",
+          apiKey: "asr-secret-5678",
+          models: {
+            asr: {
+              enabled: true,
+              modelId: "mimo-v2.5-asr",
+              asrProtocol: "mimo-audio",
+              maxRequestBytes: 10 * 1024 * 1024,
+              segmentDurationSeconds: 180,
+            },
+          },
+        },
+      },
+      active: { asr: "mimo/asr" },
+    });
+    const runtime = resolveRuntimeModelConfig("asr", saved);
+    const capability = resolveRuntimeModelCapability("asr", saved);
+    const publicConfig = toPublicModelConfig(saved);
+
+    assert.equal(runtime?.asrProtocol, "mimo-audio");
+    assert.equal(runtime?.maxRequestBytes, 10 * 1024 * 1024);
+    assert.equal(runtime?.segmentDurationSeconds, 180);
+    assert.match(runtime?.identityHash ?? "", /^[a-f0-9]{64}$/);
+    assert.equal(capability.configured, true);
+    assert.equal(capability.identityHash, runtime?.identityHash);
+    assert.equal(JSON.stringify(capability).includes("asr-secret-5678"), false);
+    assert.equal(publicConfig.providers.mimo?.apiKey, "");
+    assert.equal(publicConfig.runtimeCapabilities.asr.configured, true);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("ASR 数值边界归一化且缺少 Base URL 时能力检查失败关闭", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-model-config-asr-bounds-"));
+  try {
+    const saved = await writeModelConfig(dataRoot, {
+      providers: {
+        custom: {
+          name: "ASR",
+          kind: "openai-compatible",
+          apiKey: "secret",
+          models: { asr: { enabled: true, modelId: "whisper-1", maxRequestBytes: 1, segmentDurationSeconds: 99999 } },
+        },
+      },
+      active: { asr: "custom/asr" },
+    });
+
+    assert.equal(saved.providers.custom?.models.asr.maxRequestBytes, 1024 * 1024);
+    assert.equal(saved.providers.custom?.models.asr.segmentDurationSeconds, 1800);
+    assert.deepEqual(resolveRuntimeModelCapability("asr", saved).reason, "base_url_missing");
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("保存配置按页面供应商列表删除非 Edge 默认供应商", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "narralume-model-config-remove-provider-"));
   try {
@@ -197,15 +263,20 @@ test("模型配置 HTTP API 支持读取、保存和重启恢复", async () => {
             kind: "minimax",
             baseUrl: "https://api.minimaxi.com/v1",
             apiKey: "secret-9999",
-            models: { tts: { enabled: true, modelId: "speech-2.8-hd", voiceId: "voice-c" } },
+            models: {
+              tts: { enabled: true, modelId: "speech-2.8-hd", voiceId: "voice-c" },
+              asr: { enabled: true, modelId: "mimo-v2.5-asr", asrProtocol: "mimo-audio", maxRequestBytes: 10485760, segmentDurationSeconds: 180 },
+            },
           },
         },
-        active: { tts: "minimax/tts" },
+        active: { tts: "minimax/tts", asr: "minimax/asr" },
       },
     });
     assert.equal(saved.statusCode, 200);
     assert.equal(saved.json().config.providers.minimax.apiKey, "");
     assert.equal(saved.json().config.providers.minimax.apiKeyMasked, "****9999");
+    assert.equal(saved.json().config.runtimeCapabilities.asr.configured, true);
+    assert.match(saved.json().config.runtimeCapabilities.asr.identityHash, /^[a-f0-9]{64}$/);
 
     await app.close();
     app = buildApp({ dataRoot, logger: false });
@@ -213,6 +284,7 @@ test("模型配置 HTTP API 支持读取、保存和重启恢复", async () => {
     const stored = await readModelConfig(dataRoot);
     assert.equal(restored.json().config.active.tts, "minimax/tts");
     assert.equal(resolveRuntimeModelConfig("tts", stored)?.apiKey, "secret-9999");
+    assert.equal(resolveRuntimeModelConfig("asr", stored)?.asrProtocol, "mimo-audio");
   } finally {
     await app.close();
     await rm(dataRoot, { recursive: true, force: true });

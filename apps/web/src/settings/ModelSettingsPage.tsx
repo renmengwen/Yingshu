@@ -5,6 +5,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import {
+  ASR_PROTOCOLS,
   activeModelLabel,
   emptyProvider,
   enabledModelSummary,
@@ -125,7 +126,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
       setConfig(body.config);
       setDirty(false);
       setStatusTone("success");
-      setStatus("模型配置已保存。默认 TTS 为 Edge TTS / Chinese - China - Yunjian。");
+      setStatus("模型配置已保存。新的生产任务将读取当前默认模型；已排队任务继续使用冻结配置。");
     } catch (error) {
       setStatusTone("error");
       setStatus(`模型配置保存失败：${(error as Error).message}`);
@@ -179,7 +180,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
         {section === "models" ? <section className="grid grid-cols-[240px_minmax(0,1fr)] gap-0 px-7 py-6 max-lg:grid-cols-1 max-md:px-4">
           <aside className="border-r border-[var(--border-subtle)] pr-4 max-lg:border-r-0 max-lg:pr-0">
             <p className="mb-3 font-mono text-[11px] font-semibold tracking-[.17em] text-[var(--fg-tertiary)]">供应商</p>
-            <button type="button" disabled={!config || loading || saving} onClick={addProvider} className="mb-3 min-h-10 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm font-semibold hover:bg-[var(--bg-subtle)] disabled:opacity-50">添加供应商</button>
+            <button type="button" disabled={!config || loading || saving} onClick={addProvider} className="mb-3 min-h-11 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm font-semibold hover:bg-[var(--bg-subtle)] disabled:opacity-50">添加供应商</button>
             <div className="grid gap-2 max-lg:grid-cols-2 max-sm:grid-cols-1">
               {providers.map((provider) => (
                 <button
@@ -204,7 +205,7 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
                     <h2 className="m-0 text-lg font-semibold">全局默认模型</h2>
                     <p className="mt-1 text-sm text-[var(--fg-secondary)]">生产任务只读取这里选中的模型；供应商编辑不会自动切换默认值。</p>
                   </div>
-                  <div className="grid grid-cols-3 max-lg:grid-cols-1">
+                  <div className="grid grid-cols-4 max-xl:grid-cols-2 max-lg:grid-cols-1">
                     {MODEL_TYPES.map((type) => (
                       <label key={type} className="grid gap-2 border-r border-[var(--border-subtle)] p-4 last:border-r-0 max-lg:border-b max-lg:border-r-0 max-lg:last:border-b-0">
                         <span className="text-xs font-semibold text-[var(--fg-tertiary)]">{MODEL_TYPE_LABELS[type]}</span>
@@ -216,6 +217,11 @@ export function ModelSettingsPage({ onBack }: ModelSettingsPageProps) {
                           })}
                         </select>
                         <span className="truncate font-mono text-[11px] text-[var(--fg-tertiary)]">{activeModelLabel(config, type)}</span>
+                        {type === "asr" ? <span className="text-xs text-[var(--fg-secondary)]">
+                          {config.runtimeCapabilities?.asr.configured
+                            ? `运行时可用 · 身份 ${config.runtimeCapabilities.asr.identityHash?.slice(0, 12)}`
+                            : config.runtimeCapabilities?.asr.reason === "base_url_missing" ? "运行时不可用：缺少 Base URL" : "运行时不可用：尚未配置默认 ASR"}
+                        </span> : null}
                       </label>
                     ))}
                   </div>
@@ -279,7 +285,7 @@ function ProviderEditor({
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded border border-[var(--border-subtle)] px-2 py-1 text-xs text-[var(--fg-secondary)]">{credentialed && !provider.hasApiKey ? "待配置" : "已启用"}</span>
-          {provider.kind !== "edge-tts" ? <button type="button" onClick={() => onDelete(provider)} className="rounded border border-red-700/25 bg-red-700/10 px-3 py-1 text-xs font-semibold text-red-800 dark:text-red-200">删除</button> : null}
+          {provider.kind !== "edge-tts" ? <button type="button" onClick={() => onDelete(provider)} className="min-h-11 rounded border border-red-700/25 bg-red-700/10 px-3 text-xs font-semibold text-red-800 dark:text-red-200">删除</button> : null}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 p-4 max-lg:grid-cols-1">
@@ -328,7 +334,7 @@ function ModelConfigCard({
   const edgeTts = provider.kind === "edge-tts" && type === "tts";
   return (
     <div className={`rounded border p-3 ${model.enabled ? "border-[var(--border-strong)] bg-[var(--bg-inset)]" : "border-[var(--border-subtle)] bg-[var(--bg-canvas)]"}`}>
-      <label className="flex min-h-8 items-center gap-3">
+      <label className="flex min-h-11 items-center gap-3">
         <input type="checkbox" checked={model.enabled} disabled={edgeTts} onChange={(event) => onChange(provider, type, "enabled", event.target.checked)} />
         <span className="text-sm font-semibold">{MODEL_TYPE_INFO[type].title}</span>
         <span className="text-xs text-[var(--fg-tertiary)]">{MODEL_TYPE_INFO[type].help}</span>
@@ -336,11 +342,11 @@ function ModelConfigCard({
       <div className="mt-3 grid grid-cols-2 gap-3 max-lg:grid-cols-1">
         <label className="grid gap-2">
           <span className="text-xs font-semibold text-[var(--fg-tertiary)]">{edgeTts ? "NPM 包 / 模型" : "模型 ID"}</span>
-          <input className="min-h-10 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm disabled:opacity-60" value={model.modelId} disabled={!model.enabled || edgeTts} placeholder={MODEL_TYPE_INFO[type].placeholder} onChange={(event) => onChange(provider, type, "modelId", event.target.value)} />
+          <input className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm disabled:opacity-60" value={model.modelId} disabled={!model.enabled || edgeTts} placeholder={MODEL_TYPE_INFO[type].placeholder} onChange={(event) => onChange(provider, type, "modelId", event.target.value)} />
         </label>
         <label className="grid gap-2">
           <span className="text-xs font-semibold text-[var(--fg-tertiary)]">备注</span>
-          <input className="min-h-10 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm disabled:opacity-60" value={model.note} disabled={!model.enabled} placeholder="用途、限制或价格说明" onChange={(event) => onChange(provider, type, "note", event.target.value)} />
+          <input className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm disabled:opacity-60" value={model.note} disabled={!model.enabled} placeholder="用途、限制或价格说明" onChange={(event) => onChange(provider, type, "note", event.target.value)} />
         </label>
         {type === "text" && model.enabled ? (
           <label className="flex items-center gap-2 text-sm text-[var(--fg-secondary)]">
@@ -352,19 +358,37 @@ function ModelConfigCard({
           <>
             <label className="grid gap-2">
               <span className="text-xs font-semibold text-[var(--fg-tertiary)]">Voice ID</span>
-              <input className="min-h-10 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.voiceId ?? ""} disabled={edgeTts} placeholder="Chinese_deep_voiced_male_nv1" onChange={(event) => onChange(provider, type, "voiceId", event.target.value)} />
+              <input className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.voiceId ?? ""} disabled={edgeTts} placeholder="Chinese_deep_voiced_male_nv1" onChange={(event) => onChange(provider, type, "voiceId", event.target.value)} />
             </label>
             {edgeTts ? <div className="grid gap-2">
               <span className="text-xs font-semibold text-[var(--fg-tertiary)]">Language / Gender / 字幕边界</span>
-              <div className="min-h-10 rounded border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-3 py-2 text-sm">中文 / 男性 / {model.voiceLabel || "Chinese - China - Yunjian"} / 逐词字幕开启</div>
+              <div className="min-h-11 rounded border border-[var(--border-subtle)] bg-[var(--bg-subtle)] px-3 py-2 text-sm">中文 / 男性 / {model.voiceLabel || "Chinese - China - Yunjian"} / 逐词字幕开启</div>
             </div> : null}
             <label className="grid gap-2">
               <span className="text-xs font-semibold text-[var(--fg-tertiary)]">并发</span>
-              <input type="number" min={1} max={5} className="min-h-10 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.ttsConcurrency ?? 1} onChange={(event) => onChange(provider, type, "ttsConcurrency", Number(event.target.value))} />
+              <input type="number" min={1} max={5} className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.ttsConcurrency ?? 1} onChange={(event) => onChange(provider, type, "ttsConcurrency", Number(event.target.value))} />
             </label>
             <label className="grid gap-2">
               <span className="text-xs font-semibold text-[var(--fg-tertiary)]">队列间隔 ms</span>
-              <input type="number" min={0} max={10000} step={100} className="min-h-10 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.ttsQueueIntervalMs ?? 1800} onChange={(event) => onChange(provider, type, "ttsQueueIntervalMs", Number(event.target.value))} />
+              <input type="number" min={0} max={10000} step={100} className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.ttsQueueIntervalMs ?? 1800} onChange={(event) => onChange(provider, type, "ttsQueueIntervalMs", Number(event.target.value))} />
+            </label>
+          </>
+        ) : null}
+        {type === "asr" && model.enabled ? (
+          <>
+            <label className="grid gap-2">
+              <span className="text-xs font-semibold text-[var(--fg-tertiary)]">ASR 协议</span>
+              <select className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 text-sm" value={model.asrProtocol ?? "openai-transcription"} onChange={(event) => onChange(provider, type, "asrProtocol", event.target.value)}>
+                {ASR_PROTOCOLS.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-semibold text-[var(--fg-tertiary)]">最大请求字节</span>
+              <input type="number" min={1048576} max={104857600} step={1048576} className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 font-mono text-sm" value={model.maxRequestBytes ?? 10485760} onChange={(event) => onChange(provider, type, "maxRequestBytes", Number(event.target.value))} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs font-semibold text-[var(--fg-tertiary)]">分段时长（秒）</span>
+              <input type="number" min={30} max={1800} step={30} className="min-h-11 rounded border border-[var(--border-strong)] bg-[var(--bg-inset)] px-3 font-mono text-sm" value={model.segmentDurationSeconds ?? 180} onChange={(event) => onChange(provider, type, "segmentDurationSeconds", Number(event.target.value))} />
             </label>
           </>
         ) : null}

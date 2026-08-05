@@ -4,8 +4,10 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
 import {
+  ASR_PROTOCOLS,
   activeModelLabel,
   emptyProvider,
+  MODEL_TYPES,
   removeProvider,
   updateActive,
   updateProvider,
@@ -43,6 +45,7 @@ function config(): ModelConfig {
             gender: "male",
             wordBoundary: true,
           },
+          asr: { enabled: false, modelId: "", note: "", asrProtocol: "openai-transcription", maxRequestBytes: 10485760, segmentDurationSeconds: 180 },
         },
       },
       minimax: {
@@ -58,10 +61,11 @@ function config(): ModelConfig {
           text: { enabled: false, modelId: "", note: "" },
           image: { enabled: false, modelId: "", note: "" },
           tts: { enabled: false, modelId: "speech-2.8-hd", note: "", voiceId: "voice-a" },
+          asr: { enabled: false, modelId: "mimo-v2.5-asr", note: "", asrProtocol: "mimo-audio", maxRequestBytes: 10485760, segmentDurationSeconds: 180 },
         },
       },
     },
-    active: { text: "", image: "", tts: "edge-tts/tts" },
+    active: { text: "", image: "", tts: "edge-tts/tts", asr: "" },
   };
 }
 
@@ -108,6 +112,20 @@ test("全局创作补充展示可编辑字段且不暴露旧书籍提示词", ()
   assert.match(html, /全局画面补充/);
   assert.match(html, /固定系统合同和安全边界/);
   assert.doesNotMatch(html, /章节分析|全书世界观|逐集局部规划|本书专属/);
+});
+
+test("模型设置将 ASR 作为同一供应商下的第四种模式", () => {
+  const first = config();
+  const custom = emptyProvider("provider_asr");
+  const enabled = updateProviderModel(first, custom, "asr", "enabled", true);
+  const modeled = updateProviderModel(enabled, enabled.providers.provider_asr, "asr", "modelId", "whisper-1");
+  const active = updateActive(modeled, "asr", "provider_asr/asr");
+
+  assert.deepEqual(MODEL_TYPES, ["text", "image", "tts", "asr"]);
+  assert.deepEqual(ASR_PROTOCOLS.map((item) => item.id), ["openai-transcription", "mimo-audio"]);
+  assert.equal(custom.models.asr.maxRequestBytes, 10 * 1024 * 1024);
+  assert.equal(custom.models.asr.segmentDurationSeconds, 180);
+  assert.equal(activeModelLabel(active, "asr"), "新供应商 / whisper-1");
 });
 
 test("全局创作补充按 Unicode code point 校验并统一换行", () => {

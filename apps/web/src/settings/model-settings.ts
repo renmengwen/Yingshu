@@ -1,7 +1,8 @@
 import { responseJson } from "../client-logic";
 
-export const MODEL_TYPES = ["text", "image", "tts"] as const;
+export const MODEL_TYPES = ["text", "image", "tts", "asr"] as const;
 export type ModelType = typeof MODEL_TYPES[number];
+export type AsrProtocol = "openai-transcription" | "mimo-audio";
 
 export interface ModelEntry {
   enabled: boolean;
@@ -15,6 +16,9 @@ export interface ModelEntry {
   wordBoundary?: boolean;
   ttsConcurrency?: number;
   ttsQueueIntervalMs?: number;
+  asrProtocol?: AsrProtocol;
+  maxRequestBytes?: number;
+  segmentDurationSeconds?: number;
 }
 
 export interface ModelProvider {
@@ -32,19 +36,34 @@ export interface ModelProvider {
 export interface ModelConfig {
   providers: Record<string, ModelProvider>;
   active: Record<ModelType, string>;
+  runtimeCapabilities?: Record<ModelType, {
+    configured: boolean;
+    reason: "ready" | "active_not_configured" | "base_url_missing";
+    identityHash: string | null;
+    providerId: string | null;
+    modelId: string | null;
+    protocol: ModelProvider["protocol"] | AsrProtocol | null;
+  }>;
 }
 
 export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
   text: "分析与改编",
   image: "图片生成",
   tts: "语音合成",
+  asr: "ASR 转写",
 };
 
 export const MODEL_TYPE_INFO: Record<ModelType, { title: string; placeholder: string; help?: string }> = {
   text: { title: "分析与改编", placeholder: "gpt-4o-mini / deepseek-chat", help: "内容分析、资料整理和文案生成读取这里。" },
   image: { title: "图片生成", placeholder: "seedream-4-0 / gpt-image-2", help: "北派真实视觉资产生产读取这里。" },
   tts: { title: "TTS 语音合成", placeholder: "node-edge-tts / speech-2.8-hd", help: "短样校准与完整时间轴读取这里。" },
+  asr: { title: "ASR 音频转写", placeholder: "whisper-1 / gpt-4o-transcribe / mimo-v2.5-asr", help: "抖音视频内容证据和语速分析读取这里。" },
 };
+
+export const ASR_PROTOCOLS: ReadonlyArray<{ id: AsrProtocol; label: string }> = [
+  { id: "openai-transcription", label: "OpenAI 兼容音频转写" },
+  { id: "mimo-audio", label: "MiMo 音频输入" },
+];
 
 export const MODEL_PROTOCOLS = [
   { id: "openai-response", label: "Response（/v1/response）" },
@@ -79,6 +98,11 @@ export function emptyModelEntry(type: ModelType): ModelEntry {
     entry.ttsConcurrency = 1;
     entry.ttsQueueIntervalMs = 1800;
   }
+  if (type === "asr") {
+    entry.asrProtocol = "openai-transcription";
+    entry.maxRequestBytes = 10 * 1024 * 1024;
+    entry.segmentDurationSeconds = 180;
+  }
   return entry;
 }
 
@@ -96,6 +120,7 @@ export function emptyProvider(id = `provider_${Date.now()}`): ModelProvider {
       text: emptyModelEntry("text"),
       image: emptyModelEntry("image"),
       tts: emptyModelEntry("tts"),
+      asr: emptyModelEntry("asr"),
     },
   };
 }

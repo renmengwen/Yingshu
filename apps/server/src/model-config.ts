@@ -1,9 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-export const MODEL_CONFIG_TYPES = ["text", "image", "tts"] as const;
+export const MODEL_CONFIG_TYPES = ["text", "image", "tts", "asr"] as const;
 export type ModelConfigType = typeof MODEL_CONFIG_TYPES[number];
+export type AsrProtocol = "openai-transcription" | "mimo-audio";
+
+const DEFAULT_ASR_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
+const DEFAULT_ASR_SEGMENT_DURATION_SECONDS = 180;
 
 const DEFAULT_EDGE_VOICE_ID = "zh-CN-YunjianNeural";
 const DEFAULT_EDGE_VOICE_LABEL = "Chinese - China - Yunjian";
@@ -20,6 +24,9 @@ export interface ModelEntry {
   wordBoundary?: boolean;
   ttsConcurrency?: number;
   ttsQueueIntervalMs?: number;
+  asrProtocol?: AsrProtocol;
+  maxRequestBytes?: number;
+  segmentDurationSeconds?: number;
 }
 
 export interface ModelProvider {
@@ -44,6 +51,7 @@ export interface RuntimeModelConfig {
   providerName: string;
   providerKind: ModelProvider["kind"];
   protocol: ModelProvider["protocol"];
+  asrProtocol?: AsrProtocol;
   baseUrl: string;
   apiKey: string;
   modelId: string;
@@ -52,6 +60,18 @@ export interface RuntimeModelConfig {
   language?: string;
   gender?: "male" | "female" | "";
   wordBoundary?: boolean;
+  maxRequestBytes?: number;
+  segmentDurationSeconds?: number;
+  identityHash?: string;
+}
+
+export interface RuntimeModelCapability {
+  configured: boolean;
+  reason: "ready" | "active_not_configured" | "base_url_missing";
+  identityHash: string | null;
+  providerId: string | null;
+  modelId: string | null;
+  protocol: RuntimeModelConfig["protocol"] | AsrProtocol | null;
 }
 
 export interface RuntimeModelIdentity {
@@ -124,7 +144,7 @@ export function defaultModelConfig(): StoredModelConfig {
         models: defaultModels(),
       },
     },
-    active: { text: "", image: "", tts: "edge-tts/tts" },
+    active: { text: "", image: "", tts: "edge-tts/tts", asr: "" },
   };
 }
 
@@ -147,6 +167,10 @@ function normalizeProtocol(value: unknown): ModelProvider["protocol"] {
   return value === "anthropic-message" || value === "anthropic-messages"
     ? "anthropic-message"
     : "openai-response";
+}
+
+function normalizeAsrProtocol(value: unknown): AsrProtocol {
+  return value === "mimo-audio" ? "mimo-audio" : "openai-transcription";
 }
 
 function numberValue(value: unknown, fallback: number, min: number, max: number) {
@@ -174,6 +198,11 @@ function normalizeModelEntry(type: ModelConfigType, input: unknown): ModelEntry 
     entry.ttsConcurrency = numberValue(raw.ttsConcurrency, 1, 1, 5);
     entry.ttsQueueIntervalMs = numberValue(raw.ttsQueueIntervalMs, 1800, 0, 10000);
   }
+  if (type === "asr") {
+    entry.asrProtocol = normalizeAsrProtocol(raw.asrProtocol);
+    entry.maxRequestBytes = numberValue(raw.maxRequestBytes, DEFAULT_ASR_MAX_REQUEST_BYTES, 1024 * 1024, 100 * 1024 * 1024);
+    entry.segmentDurationSeconds = numberValue(raw.segmentDurationSeconds, DEFAULT_ASR_SEGMENT_DURATION_SECONDS, 30, 1800);
+  }
   return entry;
 }
 
@@ -190,6 +219,9 @@ function normalizeProvider(id: string, input: unknown, previous?: ModelProvider)
     models: defaultModels(),
   };
   for (const type of MODEL_CONFIG_TYPES) provider.models[type] = normalizeModelEntry(type, rawModels[type]);
+  if (provider.kind === "mimo" && !stringValue((rawModels.asr as Record<string, unknown> | undefined)?.asrProtocol)) {
+    provider.models.asr.asrProtocol = "mimo-audio";
+  }
   if (provider.kind === "edge-tts") {
     provider.apiKey = "";
     provider.baseUrl = "";
@@ -259,7 +291,7 @@ export function toPublicModelConfig(config: StoredModelConfig) {
       apiKeyMasked: maskApiKey(provider.apiKey),
     };
   }
-  return { providers: publicProviders, active: normalized.active };
+  return { providers: publicProviders, active: normalized.active, runtimeCapabilities: toRuntimeModelCapabilities(config) };
 }
 
 export function modelConfigPath(dataRoot: string) {
@@ -300,6 +332,11 @@ export function resolveRuntimeModelConfig(
   if (!provider || !model?.enabled || !model.modelId) return null;
   if (identity && model.modelId !== identity.modelId.trim()) return null;
   if (provider.kind !== "edge-tts" && !provider.apiKey) return null;
+  const asrProtocol = type === "asr" ? model.asrProtocol ?? "openai-transcription" : undefined;
+  const identityHash = createHash("sha256").update(JSON.stringify({
+    type, providerId, modelId: model.modelId, baseUrl: provider.baseUrl, protocol: asrProtocol ?? provider.protocol,
+    maxRequestBytes: model.maxRequestBytes, segmentDurationSeconds: model.segmentDurationSeconds,
+  })).digest("hex");
   return {
     enabled: true,
     type,
@@ -307,6 +344,7 @@ export function resolveRuntimeModelConfig(
     providerName: provider.name,
     providerKind: provider.kind,
     protocol: provider.protocol,
+    asrProtocol,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId: model.modelId,
@@ -315,5 +353,30 @@ export function resolveRuntimeModelConfig(
     language: model.language,
     gender: model.gender,
     wordBoundary: model.wordBoundary,
+    maxRequestBytes: model.maxRequestBytes,
+    segmentDurationSeconds: model.segmentDurationSeconds,
+    identityHash,
   };
+}
+
+export function resolveRuntimeModelCapability(type: ModelConfigType, config: StoredModelConfig): RuntimeModelCapability {
+  const runtime = resolveRuntimeModelConfig(type, config);
+  if (!runtime) {
+    return { configured: false, reason: "active_not_configured", identityHash: null, providerId: null, modelId: null, protocol: null };
+  }
+  if (type === "asr" && !runtime.baseUrl) {
+    return {
+      configured: false, reason: "base_url_missing", identityHash: runtime.identityHash ?? null,
+      providerId: runtime.providerId, modelId: runtime.modelId, protocol: runtime.asrProtocol ?? runtime.protocol,
+    };
+  }
+  return {
+    configured: true, reason: "ready", identityHash: runtime.identityHash ?? null,
+    providerId: runtime.providerId, modelId: runtime.modelId, protocol: runtime.asrProtocol ?? runtime.protocol,
+  };
+}
+
+export function toRuntimeModelCapabilities(config: StoredModelConfig) {
+  return Object.fromEntries(MODEL_CONFIG_TYPES.map((type) => [type, resolveRuntimeModelCapability(type, config)])) as
+    Record<ModelConfigType, RuntimeModelCapability>;
 }
