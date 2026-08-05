@@ -7,7 +7,7 @@ import type { Browser, BrowserContext, Cookie, Page, Response as PlaywrightRespo
 
 import {
   DouyinSourceError, extractDouyinAwemeId, fetchDouyinVideoDetail, loadDouyinCookies,
-  parseDouyinVideoDetail, redactDouyinDiagnostic, resolveDouyinSource, saveDouyinCookies,
+  fetchDouyinSessionJson, parseDouyinVideoDetail, redactDouyinDiagnostic, resolveDouyinSource, saveDouyinCookies,
   waitForVisibleDouyinLogin, type DouyinChromeSession,
 } from "./douyin-source.js";
 
@@ -148,4 +148,36 @@ test("可见 Chrome 登录等待 session Cookie，验证页单独返回 need_ver
       pollMs: 1, sessionFactory: async () => createSession("安全验证", "完成验证码"),
     }), (error: unknown) => error instanceof DouyinSourceError && error.kind === "need_verify");
   } finally { await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test("已登录 session JSON helper 限制端点、补浏览器环境并分型响应", async () => {
+  let evaluated: Record<string, unknown> | undefined;
+  const session = {
+    context: { cookies: async () => [{ name: "sessionid", value: "secret", domain: ".douyin.com" }] },
+    page: { evaluate: async (_callback: unknown, input: Record<string, unknown>) => {
+      evaluated = input; return { status: 200, ok: true, text: '{"comments":[]}', tooLarge: false };
+    } },
+  } as unknown as Pick<DouyinChromeSession, "context" | "page">;
+  assert.deepEqual(await fetchDouyinSessionJson(session, {
+    uri: "/aweme/v1/web/comment/list/", params: { aweme_id: id, count: 20 },
+    referer: `https://www.douyin.com/video/${id}`,
+  }), { comments: [] });
+  assert.equal(evaluated?.uri, "/aweme/v1/web/comment/list/");
+  assert.deepEqual(evaluated?.params, { aweme_id: id, count: 20 });
+  await assert.rejects(fetchDouyinSessionJson(session, {
+    uri: "/aweme/v1/web/user/profile/other/", params: {},
+  }), (error: unknown) => error instanceof DouyinSourceError && error.kind === "parse_failed");
+
+  for (const [result, kind] of [
+    [{ failure: "signer_unavailable" }, "platform_blocked"],
+    [{ failure: "timeout" }, "timeout"],
+    [{ status: 412, ok: false, text: "", tooLarge: false }, "need_verify"],
+    [{ status: 200, ok: true, text: "blocked", tooLarge: false }, "need_verify"],
+    [{ status: 200, ok: true, text: "not-json", tooLarge: false }, "parse_failed"],
+  ] as const) {
+    const failing = { ...session, page: { evaluate: async () => result } } as unknown as Pick<DouyinChromeSession, "context" | "page">;
+    await assert.rejects(fetchDouyinSessionJson(failing, {
+      uri: "/aweme/v1/web/comment/list/", params: { aweme_id: id },
+    }), (error: unknown) => error instanceof DouyinSourceError && error.kind === kind);
+  }
 });

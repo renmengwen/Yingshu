@@ -18,6 +18,11 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_SINGLE_TIMEOUT_MS = 8_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_REDIRECTS = 5;
+const DOUYIN_SESSION_ENDPOINTS = new Set([
+  "/aweme/v1/web/aweme/detail/",
+  "/aweme/v1/web/comment/list/",
+  "/aweme/v1/web/comment/list/reply/",
+]);
 
 export type DouyinSourceFailure =
   | "need_login"
@@ -280,6 +285,127 @@ export interface DouyinChromeSession {
   context: BrowserContext;
   page: Page;
   close(): Promise<void>;
+}
+
+type DouyinApiScalar = string | number | boolean;
+
+function parseSessionParams(params: Record<string, unknown>) {
+  const entries = Object.entries(params);
+  if (entries.length > 64) throw new DouyinSourceError("parse_failed", "抖音 API 参数过多");
+  const parsed: Record<string, DouyinApiScalar> = {};
+  for (const [key, value] of entries) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(key)
+      || /cookie|authorization|token/i.test(key) && key !== "msToken") {
+      throw new DouyinSourceError("parse_failed", "抖音 API 参数名称无效");
+    }
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      throw new DouyinSourceError("parse_failed", `抖音 API 参数 ${key} 无效`);
+    }
+    if (String(value).length > 2_048) throw new DouyinSourceError("parse_failed", `抖音 API 参数 ${key} 过长`);
+    parsed[key] = value;
+  }
+  return parsed;
+}
+
+/**
+ * 在已登录页面中复用真实浏览器环境、Cookie 与页面 a_bogus signer 发起请求。
+ * helper 只开放详情和评论三个首版端点，调用方无法借此访问任意平台接口。
+ */
+export async function fetchDouyinSessionJson(session: Pick<DouyinChromeSession, "context" | "page">, input: {
+  uri: string;
+  params: Record<string, unknown>;
+  referer?: string;
+  timeoutMs?: number;
+  maxBytes?: number;
+  signal?: AbortSignal;
+}): Promise<unknown> {
+  if (!DOUYIN_SESSION_ENDPOINTS.has(input.uri)) throw new DouyinSourceError("parse_failed", "抖音 API 端点不在白名单中");
+  const params = parseSessionParams(input.params);
+  const timeoutMs = Math.min(Math.max(input.timeoutMs ?? 15_000, 100), 60_000);
+  const maxBytes = Math.min(Math.max(input.maxBytes ?? 2 * 1024 * 1024, 1_024), 8 * 1024 * 1024);
+  const referer = input.referer ? ensureDouyinUrl(input.referer).href : "https://www.douyin.com/";
+  const cookies = await session.context.cookies("https://www.douyin.com");
+  if (!cookies.some((cookie) => cookie.name === "sessionid" || cookie.name === "LOGIN_STATUS")) {
+    throw new DouyinSourceError("need_login", "需要先登录抖音");
+  }
+  if (input.signal?.aborted) throw new DouyinSourceError("timeout", "抖音 API 请求已中断");
+
+  const requestId = `yingshu_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const abort = () => { void session.page.evaluate((id) => {
+    const state = globalThis as unknown as { __yingshuDouyinRequests?: Map<string, AbortController> };
+    state.__yingshuDouyinRequests?.get(id)?.abort();
+  }, requestId).catch(() => undefined); };
+  input.signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const result = await session.page.evaluate(async (request) => {
+      const state = globalThis as unknown as {
+        bdms?: { init?: { _v?: Array<{ p?: Record<number, unknown> }> } };
+        __yingshuDouyinRequests?: Map<string, AbortController>;
+      };
+      const local: Record<string, string> = {};
+      try {
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index); if (key) local[key] = localStorage.getItem(key) ?? "";
+        }
+      } catch { /* 隐私模式下 localStorage 可能不可读。 */ }
+      const cookie = (name: string) => document.cookie.split(";").map((item) => item.trim())
+        .find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? "";
+      const ua = navigator.userAgent || "";
+      const common: Record<string, DouyinApiScalar> = {
+        device_platform: "webapp", aid: "6383", channel: "channel_pc_web", pc_client_type: "1",
+        cookie_enabled: "true", browser_language: navigator.language || "zh-CN",
+        browser_platform: navigator.platform || "Win32", browser_name: "Chrome",
+        browser_version: ua.match(/Chrome\/([\d.]+)/u)?.[1] ?? "", browser_online: navigator.onLine ? "true" : "false",
+        engine_name: "Blink", os_name: "Windows", os_version: "10",
+        cpu_core_num: String(navigator.hardwareConcurrency || 8),
+        screen_width: String(screen.width || 1920), screen_height: String(screen.height || 1080),
+        webid: cookie("webid") || cookie("ttwid").replace(/\D/gu, "").slice(0, 19),
+        msToken: local.xmst || local.msToken || "",
+      };
+      const merged = { ...common, ...request.params };
+      const query = new URLSearchParams(Object.entries(merged).map(([key, value]) => [key, String(value)])).toString();
+      const signer = state.bdms?.init?._v?.[2]?.p?.[42];
+      if (typeof signer !== "function") return { failure: "signer_unavailable" };
+      const signType = request.uri.includes("/reply/") ? 8 : 14;
+      const aBogus = (signer as (...args: unknown[]) => unknown)(0, 1, signType, query, "", ua);
+      if (typeof aBogus !== "string" || !aBogus) return { failure: "signer_unavailable" };
+      const controller = new AbortController();
+      state.__yingshuDouyinRequests ??= new Map();
+      state.__yingshuDouyinRequests.set(request.requestId, controller);
+      const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+      try {
+        const url = new URL(request.uri, "https://www.douyin.com");
+        for (const [key, value] of Object.entries(merged)) url.searchParams.set(key, String(value));
+        url.searchParams.set("a_bogus", aBogus);
+        const response = await fetch(url, {
+          credentials: "include", headers: { Accept: "application/json, text/plain, */*" },
+          referrer: request.referer, signal: controller.signal,
+        });
+        const text = await response.text();
+        const bytes = new TextEncoder().encode(text).byteLength;
+        return { status: response.status, ok: response.ok, text: bytes <= request.maxBytes ? text : "", tooLarge: bytes > request.maxBytes };
+      } catch (error) {
+        return { failure: error instanceof DOMException && error.name === "AbortError" ? "timeout" : "network" };
+      } finally {
+        clearTimeout(timer); state.__yingshuDouyinRequests.delete(request.requestId);
+      }
+    }, { requestId, uri: input.uri, params, referer, timeoutMs, maxBytes });
+
+    if (result.failure === "signer_unavailable") throw new DouyinSourceError("platform_blocked", "抖音页面签名能力不可用，请刷新可见 Chrome 后重试");
+    if (result.failure === "timeout") throw new DouyinSourceError("timeout", "抖音 API 请求超时或已中断");
+    if (result.failure === "network") throw new DouyinSourceError("platform_blocked", "抖音 API 网络请求失败");
+    if (result.tooLarge) throw new DouyinSourceError("platform_blocked", "抖音 API 响应超过大小限制");
+    if (!result.ok) {
+      if (result.status === 401 || result.status === 403) throw new DouyinSourceError("need_login", "抖音登录已失效");
+      if (result.status === 412 || result.status === 429) throw new DouyinSourceError("need_verify", "抖音需要完成验证后才能继续");
+      throw new DouyinSourceError("platform_blocked", `抖音 API HTTP ${result.status}`);
+    }
+    if (!result.text || result.text === "blocked") throw new DouyinSourceError("need_verify", "抖音 API 返回验证阻断");
+    try { return JSON.parse(result.text); }
+    catch (error) { throw new DouyinSourceError("parse_failed", "抖音 API 返回了非 JSON 内容", { cause: error }); }
+  } finally {
+    input.signal?.removeEventListener("abort", abort);
+  }
 }
 
 export async function openVisibleDouyinChrome(dataRoot: string, options: {
