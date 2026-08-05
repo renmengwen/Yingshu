@@ -1,0 +1,386 @@
+/**
+ * 抖音来源最小接入链，迁移自 MuseDock 的 creativeContext.js 与 scraper/douyin.js。
+ * 实质修改：TypeScript/ESM、逐跳域名校验、随机 CDP 端口、受控 dataRoot Cookie，移除搜索和作者批量能力。
+ */
+import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+
+import { chromium, type Browser, type BrowserContext, type Cookie, type Page } from "playwright-core";
+
+const AWEME_ID = /^\d{5,32}$/;
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/giu;
+const TRAILING_PUNCTUATION = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/u;
+const DOUYIN_HOST = /(^|\.)(douyin\.com|iesdouyin\.com)$/i;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+const DEFAULT_SINGLE_TIMEOUT_MS = 8_000;
+const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_REDIRECTS = 5;
+
+export type DouyinSourceFailure =
+  | "need_login"
+  | "need_verify"
+  | "platform_blocked"
+  | "timeout"
+  | "parse_failed";
+
+export class DouyinSourceError extends Error {
+  constructor(public readonly kind: DouyinSourceFailure, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "DouyinSourceError";
+  }
+}
+
+export interface NormalizedDouyinSource {
+  awemeId: string;
+  sourceUrl: string;
+  canonicalUrl: string;
+}
+
+export interface DouyinVideoDetail {
+  awemeId: string;
+  canonicalUrl: string;
+  title: string;
+  description: string;
+  author: { id: string; secUid: string; nickname: string };
+  publishedAt: number | null;
+  durationMs: number | null;
+  statistics: { likes: number | null; comments: number | null; collects: number | null; shares: number | null };
+  coverUrl: string | null;
+  videoDownloadUrl: string | null;
+  audioDownloadUrl: string | null;
+}
+
+type Fetch = typeof fetch;
+
+function ensureDouyinUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new DouyinSourceError("parse_failed", "抖音链接无效");
+  }
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || !DOUYIN_HOST.test(url.hostname)) {
+    throw new DouyinSourceError("parse_failed", "只支持 HTTP(S) 抖音链接");
+  }
+  url.hash = "";
+  return url;
+}
+
+function extractUrls(sourceText: string) {
+  return [...sourceText.matchAll(URL_IN_TEXT)]
+    .map((match) => match[0].replace(TRAILING_PUNCTUATION, ""))
+    .filter(Boolean);
+}
+
+export function extractDouyinAwemeId(sourceText: string) {
+  const text = sourceText.trim();
+  if (AWEME_ID.test(text)) return text;
+  for (const candidate of extractUrls(text)) {
+    let url: URL;
+    try {
+      url = ensureDouyinUrl(candidate);
+    } catch {
+      continue;
+    }
+    const pathId = url.pathname.match(/\/video\/(\d{5,32})(?:\/|$)/u)?.[1];
+    const queryId = url.searchParams.get("modal_id") ?? url.searchParams.get("aweme_id")
+      ?? url.searchParams.get("item_id");
+    if (pathId && AWEME_ID.test(pathId)) return pathId;
+    if (queryId && AWEME_ID.test(queryId)) return queryId;
+  }
+  return null;
+}
+
+function firstDouyinUrl(sourceText: string) {
+  for (const candidate of extractUrls(sourceText)) {
+    try {
+      return ensureDouyinUrl(candidate);
+    } catch {
+      // 分享文案可能包含其他链接，只选择抖音域名。
+    }
+  }
+  throw new DouyinSourceError("parse_failed", "分享文案中未找到抖音视频链接");
+}
+
+async function fetchManual(fetchImpl: Fetch, url: URL, timeoutMs: number, totalSignal: AbortSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(totalSignal.reason);
+  totalSignal.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error("single redirect timeout")), timeoutMs);
+  try {
+    return await fetchImpl(url, {
+      method: "GET",
+      redirect: "manual",
+      signal: controller.signal,
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36" },
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new DouyinSourceError("timeout", "解析抖音链接超时", { cause: error });
+    throw new DouyinSourceError("platform_blocked", "抖音链接请求被平台阻断", { cause: error });
+  } finally {
+    clearTimeout(timer);
+    totalSignal.removeEventListener("abort", abort);
+  }
+}
+
+export async function resolveDouyinSource(sourceText: string, options: {
+  fetchImpl?: Fetch;
+  singleTimeoutMs?: number;
+  totalTimeoutMs?: number;
+  maxRedirects?: number;
+} = {}): Promise<NormalizedDouyinSource> {
+  const directId = extractDouyinAwemeId(sourceText);
+  if (directId && AWEME_ID.test(sourceText.trim())) {
+    const canonicalUrl = `https://www.douyin.com/video/${directId}`;
+    return { awemeId: directId, sourceUrl: canonicalUrl, canonicalUrl };
+  }
+  let current = firstDouyinUrl(sourceText);
+  if (directId) {
+    return { awemeId: directId, sourceUrl: current.href, canonicalUrl: `https://www.douyin.com/video/${directId}` };
+  }
+  if (current.hostname.toLowerCase() !== "v.douyin.com") {
+    throw new DouyinSourceError("parse_failed", "无法从抖音链接识别视频 ID");
+  }
+
+  const total = new AbortController();
+  const totalTimer = setTimeout(() => total.abort(new Error("total redirect timeout")),
+    options.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS);
+  try {
+    const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+    for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      const response = await fetchManual(options.fetchImpl ?? fetch, current,
+        options.singleTimeoutMs ?? DEFAULT_SINGLE_TIMEOUT_MS, total.signal);
+      const location = REDIRECT_STATUS.has(response.status) ? response.headers.get("location") : null;
+      await response.body?.cancel().catch(() => undefined);
+      if (!location) {
+        const id = extractDouyinAwemeId(current.href);
+        if (id) return { awemeId: id, sourceUrl: current.href, canonicalUrl: `https://www.douyin.com/video/${id}` };
+        throw new DouyinSourceError("parse_failed", "抖音短链接未跳转到视频页面");
+      }
+      if (hop === maxRedirects) throw new DouyinSourceError("platform_blocked", "抖音短链接跳转次数过多");
+      current = ensureDouyinUrl(new URL(location, current).href);
+      const id = extractDouyinAwemeId(current.href);
+      if (id) return { awemeId: id, sourceUrl: current.href, canonicalUrl: `https://www.douyin.com/video/${id}` };
+    }
+    throw new DouyinSourceError("parse_failed", "无法解析抖音短链接");
+  } finally {
+    clearTimeout(totalTimer);
+  }
+}
+
+function stringValue(value: unknown) { return typeof value === "string" ? value : ""; }
+function finiteInteger(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : null;
+}
+function firstHttpsUrl(value: unknown) {
+  const candidates = Array.isArray(value) ? value : typeof value === "object" && value !== null
+    ? (value as { url_list?: unknown }).url_list : [];
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (typeof candidate !== "string") continue;
+    try { const url = new URL(candidate); if (url.protocol === "https:") return url.href; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+export function parseDouyinVideoDetail(input: unknown): DouyinVideoDetail {
+  const root = input as Record<string, unknown> | null;
+  const nested = root?.aweme_detail ?? root?.aweme ?? (root?.data as Record<string, unknown> | undefined)?.aweme_detail;
+  const aweme = (nested ?? root) as Record<string, unknown> | null;
+  const awemeId = stringValue(aweme?.aweme_id);
+  if (!AWEME_ID.test(awemeId)) throw new DouyinSourceError("parse_failed", "抖音详情缺少有效视频 ID");
+  const author = (aweme?.author ?? {}) as Record<string, unknown>;
+  const statistics = (aweme?.statistics ?? {}) as Record<string, unknown>;
+  const video = (aweme?.video ?? {}) as Record<string, unknown>;
+  const music = (aweme?.music ?? {}) as Record<string, unknown>;
+  const description = stringValue(aweme?.desc);
+  return {
+    awemeId,
+    canonicalUrl: `https://www.douyin.com/video/${awemeId}`,
+    title: description || stringValue(aweme?.preview_title) || stringValue((aweme?.share_info as Record<string, unknown>)?.share_title),
+    description,
+    author: { id: stringValue(author.uid), secUid: stringValue(author.sec_uid), nickname: stringValue(author.nickname) },
+    publishedAt: finiteInteger(aweme?.create_time),
+    durationMs: finiteInteger(video.duration),
+    statistics: {
+      likes: finiteInteger(statistics.digg_count), comments: finiteInteger(statistics.comment_count),
+      collects: finiteInteger(statistics.collect_count), shares: finiteInteger(statistics.share_count),
+    },
+    coverUrl: firstHttpsUrl(video.cover) ?? firstHttpsUrl(video.origin_cover),
+    videoDownloadUrl: firstHttpsUrl(video.play_addr_h264) ?? firstHttpsUrl(video.play_addr),
+    audioDownloadUrl: firstHttpsUrl(music.play_url) ?? firstHttpsUrl(music.play_url_hq),
+  };
+}
+
+function controlledPath(dataRoot: string, ...parts: string[]) {
+  const root = resolve(dataRoot);
+  const target = resolve(root, ...parts);
+  if (target !== root && !target.startsWith(`${root}${sep}`)) throw new DouyinSourceError("parse_failed", "运行时路径无效");
+  return target;
+}
+
+export async function loadDouyinCookies(dataRoot: string): Promise<Cookie[]> {
+  try {
+    const parsed = JSON.parse(await readFile(controlledPath(dataRoot, "douyin", "cookies.json"), "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((cookie): cookie is Cookie => cookie && typeof cookie.name === "string"
+      && typeof cookie.value === "string" && typeof cookie.domain === "string" && DOUYIN_HOST.test(cookie.domain.replace(/^\./u, "")));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new DouyinSourceError("parse_failed", "抖音 Cookie 文件无效", { cause: error });
+  }
+}
+
+export async function saveDouyinCookies(dataRoot: string, cookies: Cookie[]) {
+  const file = controlledPath(dataRoot, "douyin", "cookies.json");
+  const safe = cookies.filter((cookie) => DOUYIN_HOST.test(cookie.domain.replace(/^\./u, ""))).map((cookie) => ({
+    name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path,
+    expires: cookie.expires, httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite,
+  }));
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(safe)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
+export function redactDouyinDiagnostic(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\b(cookie|authorization|set-cookie)\s*[:=]\s*[^\s,;]+/giu, "$1=[已脱敏]")
+    .replace(/\b(sessionid|sid_guard|passport_csrf_token)=[^\s,;]+/giu, "$1=[已脱敏]")
+    .replace(/[A-Za-z]:\\[^\r\n"']+/gu, "[本地路径已隐藏]");
+}
+
+async function freePort() {
+  return await new Promise<number>((resolvePort, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => error ? reject(error) : resolvePort(port));
+    });
+  });
+}
+
+export async function findLocalChrome(explicitPath?: string) {
+  const candidates = [explicitPath, process.env.CHROME_PATH,
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe") : undefined,
+  ].filter((item): item is string => Boolean(item));
+  for (const candidate of candidates) {
+    try { await access(candidate, constants.X_OK); return candidate; } catch { /* try next */ }
+  }
+  throw new DouyinSourceError("platform_blocked", "未找到本机 Chrome，请先安装 Chrome");
+}
+
+export interface DouyinChromeSession {
+  browser: Browser;
+  context: BrowserContext;
+  page: Page;
+  close(): Promise<void>;
+}
+
+export async function openVisibleDouyinChrome(dataRoot: string, options: {
+  chromePath?: string;
+  connectTimeoutMs?: number;
+} = {}): Promise<DouyinChromeSession> {
+  const chromePath = await findLocalChrome(options.chromePath);
+  const port = await freePort();
+  const profile = controlledPath(dataRoot, "douyin", "chrome-profile");
+  await mkdir(profile, { recursive: true });
+  const processHandle: ChildProcess = spawn(chromePath, [
+    `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+    "https://www.douyin.com/",
+  ], { stdio: "ignore", windowsHide: false });
+  const deadline = Date.now() + (options.connectTimeoutMs ?? 15_000);
+  let browser: Browser | undefined;
+  while (Date.now() < deadline && !browser) {
+    try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1_000 }); }
+    catch { await new Promise((resolveDelay) => setTimeout(resolveDelay, 150)); }
+  }
+  if (!browser) {
+    processHandle.kill();
+    throw new DouyinSourceError("timeout", "等待本机 Chrome 启动超时");
+  }
+  const context = browser.contexts()[0] ?? await browser.newContext();
+  const cookies = await loadDouyinCookies(dataRoot);
+  if (cookies.length) await context.addCookies(cookies);
+  const page = context.pages()[0] ?? await context.newPage();
+  return { browser, context, page, close: async () => {
+    await saveDouyinCookies(dataRoot, await context.cookies("https://www.douyin.com"));
+    await browser.close().catch(() => undefined);
+    processHandle.kill();
+  } };
+}
+
+function pageState(title: string, url: string, body: string): DouyinSourceFailure | null {
+  const text = `${title}\n${url}\n${body.slice(0, 5_000)}`;
+  if (/验证码|安全验证|verify|captcha|访问过于频繁/iu.test(text)) return "need_verify";
+  if (/扫码登录|登录后|请登录|passport/iu.test(text)) return "need_login";
+  if (/拒绝访问|请求异常|网络错误|服务繁忙|blocked|forbidden/iu.test(text)) return "platform_blocked";
+  return null;
+}
+
+export async function waitForVisibleDouyinLogin(dataRoot: string, options: {
+  chromePath?: string;
+  timeoutMs?: number;
+  pollMs?: number;
+  signal?: AbortSignal;
+  sessionFactory?: typeof openVisibleDouyinChrome;
+} = {}) {
+  const session = await (options.sessionFactory ?? openVisibleDouyinChrome)(dataRoot, { chromePath: options.chromePath });
+  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  try {
+    await session.page.goto("https://www.douyin.com/", { waitUntil: "domcontentloaded", timeout: 20_000 });
+    while (Date.now() < deadline) {
+      if (options.signal?.aborted) throw new DouyinSourceError("timeout", "等待抖音登录已中断");
+      const cookies = await session.context.cookies("https://www.douyin.com");
+      if (cookies.some((cookie) => cookie.name === "sessionid" || cookie.name === "LOGIN_STATUS")) {
+        await saveDouyinCookies(dataRoot, cookies);
+        return { status: "succeeded" as const };
+      }
+      const state = pageState(await session.page.title(), session.page.url(),
+        await session.page.locator("body").innerText().catch(() => ""));
+      if (state === "need_verify") throw new DouyinSourceError("need_verify", "抖音需要完成验证后才能继续");
+      if (state === "platform_blocked") throw new DouyinSourceError("platform_blocked", "抖音平台阻止了登录页面");
+      await session.page.waitForTimeout(options.pollMs ?? 500);
+    }
+    throw new DouyinSourceError("timeout", "等待抖音登录超时");
+  } finally {
+    await session.close();
+  }
+}
+
+export async function fetchDouyinVideoDetail(dataRoot: string, awemeId: string, options: {
+  chromePath?: string;
+  navigationTimeoutMs?: number;
+  sessionFactory?: typeof openVisibleDouyinChrome;
+} = {}): Promise<DouyinVideoDetail> {
+  if (!AWEME_ID.test(awemeId)) throw new DouyinSourceError("parse_failed", "抖音视频 ID 无效");
+  const session = await (options.sessionFactory ?? openVisibleDouyinChrome)(dataRoot, { chromePath: options.chromePath });
+  try {
+    let captured: unknown;
+    session.page.on("response", async (response) => {
+      if (captured || !response.url().includes("/aweme/v1/web/aweme/detail/")) return;
+      try { captured = await response.json(); } catch { /* 页面状态统一处理 */ }
+    });
+    try {
+      await session.page.goto(`https://www.douyin.com/video/${awemeId}`, {
+        waitUntil: "domcontentloaded", timeout: options.navigationTimeoutMs ?? 20_000,
+      });
+      await session.page.waitForTimeout(1_000);
+    } catch (error) {
+      if ((error as Error).name === "TimeoutError") throw new DouyinSourceError("timeout", "获取抖音详情超时", { cause: error });
+      throw new DouyinSourceError("platform_blocked", "抖音详情页面无法访问", { cause: error });
+    }
+    if (captured) return parseDouyinVideoDetail(captured);
+    const state = pageState(await session.page.title(), session.page.url(), await session.page.locator("body").innerText().catch(() => ""));
+    if (state) throw new DouyinSourceError(state, state === "need_login" ? "需要在可见 Chrome 中登录抖音"
+      : state === "need_verify" ? "抖音需要完成验证后才能继续" : "抖音平台阻止了详情请求");
+    throw new DouyinSourceError("parse_failed", "抖音详情响应无法解析");
+  } finally {
+    await session.close();
+  }
+}
