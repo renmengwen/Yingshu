@@ -9,6 +9,10 @@ import { openDatabase } from "./database.js";
 
 function dropVideoPlanTables(database: DatabaseSync) {
   database.exec(`
+    DROP TABLE video_douyin_analysis_selection_events;
+    DROP TABLE video_douyin_analysis_selections;
+    DROP TABLE video_douyin_analysis_jobs;
+    DROP TABLE video_douyin_analysis_snapshots;
     DROP TABLE video_final_videos;
     DROP TABLE video_render_chunks;
     DROP TABLE video_render_runs;
@@ -133,7 +137,7 @@ test("数据库迁移可重复执行并在重启后保留书库数据", async ()
 
     assert.equal(book?.id, "book_sha256");
     assert.equal(book?.title, "测试书");
-    assert.equal(migration?.version, 25);
+    assert.equal(migration?.version, 26);
     assert.equal(chapterCount?.count, 0);
     assert.equal(eventCount?.count, 0);
     assert.equal(sourceCount?.count, 0);
@@ -187,7 +191,7 @@ test("v20 项目视频原地升级 v21 后获得输入草稿默认值和全局�
         "SELECT script_instructions, visual_instructions, updated_at FROM global_prompt_settings WHERE id = 1",
       ).get() }, { script_instructions: "", visual_instructions: "", updated_at: 0 });
       assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations")
-        .get()?.version, 25);
+        .get()?.version, 26);
     } finally {
       upgraded.close();
     }
@@ -253,7 +257,7 @@ test("v21 视频原地升级 v22 后保留全部输入列并获得严格计划�
       upgraded.database.prepare("UPDATE videos SET status = 'completed' WHERE id = 'video'").run();
       assert.throws(() => upgraded.database.prepare("UPDATE videos SET status = 'published' WHERE id = 'video'").run(),
         /CHECK constraint failed/);
-      assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
+      assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
     } finally { upgraded.close(); }
   } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
@@ -446,7 +450,7 @@ test("未来迁移版本或版本断层会失败关闭", async () => {
     try {
       openDatabase(dataRoot).close();
       const malformed = new DatabaseSync(databasePath);
-      if (mode === "future") malformed.prepare("INSERT INTO schema_migrations (version) VALUES (26)").run();
+      if (mode === "future") malformed.prepare("INSERT INTO schema_migrations (version) VALUES (27)").run();
       else malformed.prepare("DELETE FROM schema_migrations WHERE version = 1").run();
       malformed.close();
 
@@ -524,7 +528,7 @@ test("既有 migration v2 数据库可原地升级 checkpoint、章节事件与�
     const eventTable = upgraded.database
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chapter_events'")
       .get();
-    assert.equal(migration?.version, 25);
+    assert.equal(migration?.version, 26);
     assert.equal(checkpointTable?.name, "job_checkpoints");
     assert.equal(eventTable?.name, "chapter_events");
     upgraded.close();
@@ -565,7 +569,7 @@ test("既有 migration v5 数据库可升级批准事件且删除分集会完整
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      25,
+      26,
     );
     upgraded.database.prepare(
       `INSERT INTO script_versions (
@@ -629,7 +633,7 @@ test("既有 migration v7 数据库可升级音频段与字幕并约束不可变
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      25,
+      26,
     );
     const audioTables = upgraded.database
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'audio_%' ORDER BY name")
@@ -724,7 +728,7 @@ test("既有 migration v4 数据库可升级 v5 且删除书籍会级联分集�
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      25,
+      26,
     );
     upgraded.database.prepare(
       `INSERT INTO series_projects (id, book_id, title, created_at, updated_at)
@@ -782,7 +786,7 @@ test("既有 migration v8 数据库可升级资产合同并保持关系约束", 
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      25,
+      26,
     );
     const tables = upgraded.database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('assets', 'asset_aliases') ORDER BY name",
@@ -928,7 +932,7 @@ test("既有 migration v10 数据库可升级视觉段与显式资产关系", as
     const upgraded = openDatabase(dataRoot);
     assert.equal(
       upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
-      25,
+      26,
     );
     const tables = upgraded.database.prepare(
       `SELECT name FROM sqlite_master
@@ -978,7 +982,7 @@ test("既有 migration v11 数据库保留数据升级 render_chunks 并执行�
 
     const upgraded = openDatabase(dataRoot);
     const database = upgraded.database;
-    assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
+    assert.equal(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
     assert.equal(database.prepare("SELECT title FROM books WHERE id = 'book_v11'").get()?.title, "旧数据");
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='render_chunks'").get()?.name, "render_chunks");
     const insert = database.prepare(
@@ -1109,7 +1113,7 @@ test("既有 migration v13 数据库升级流水线表并执行 active、约束�
 
     const upgraded = openDatabase(dataRoot);
     const db = upgraded.database;
-    assert.equal(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 25);
+    assert.equal(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
     const insert = db.prepare(`INSERT INTO series_pipeline_runs
       (id,series_project_id,status,episode_count,target_duration_seconds,source_start_chapter_id,
        source_end_chapter_id,config_hash,created_at,updated_at)
