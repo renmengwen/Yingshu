@@ -3,6 +3,7 @@ import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "../c
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Textarea } from "../components/ui/textarea";
 import { EyeIcon, SaveIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import type { VideoInputDraft } from "./types";
 import { useVideoInput } from "./use-video-input";
 import { videoPlanLaunchBlockReason, VideoPlanLauncher } from "./VideoPlanLauncher";
@@ -11,15 +12,16 @@ import {
 } from "./VideoProductionSettingsDialog";
 import { promptInstructionsStatus, selectedVisualStylePreset, VISUAL_STYLE_PRESETS } from "./visual-style-presets";
 import type { useVideoPlan } from "./use-video-plan";
+import { DouyinAnalysisPanel } from "./douyin-analysis/DouyinAnalysisPanel";
 
 const segmentClass = segmentedOptionClass;
 
 export function VideoInputStage({ projectId, videoId, planState, onPlanStarted }: { projectId: string; videoId: string; planState: ReturnType<typeof useVideoPlan>; onPlanStarted: () => void }) {
   const state = useVideoInput(projectId, videoId);
-  return <VideoInputContent state={state} planState={planState} onPlanStarted={onPlanStarted} />;
+  return <VideoInputContent state={state} planState={planState} onPlanStarted={onPlanStarted} douyinPanel={<DouyinAnalysisPanel projectId={projectId} videoId={videoId} inputDirty={state.dirty} />} />;
 }
 
-export function VideoInputContent({ state, planState, onPlanStarted }: { state: ReturnType<typeof useVideoInput>; planState?: ReturnType<typeof useVideoPlan>; onPlanStarted?: () => void }) {
+export function VideoInputContent({ state, planState, onPlanStarted, douyinPanel }: { state: ReturnType<typeof useVideoInput>; planState?: ReturnType<typeof useVideoPlan>; onPlanStarted?: () => void; douyinPanel?: ReactNode }) {
   const update = <K extends keyof VideoInputDraft>(key: K, value: VideoInputDraft[K]) => state.setDraft((current) => current ? { ...current, [key]: value } : current);
   const launchAvailable = Boolean(planState && state.draft && !planState.plan && (!planState.job || planState.job.status === "failed" || planState.job.status === "cancelled"));
   const launchBlockReason = launchAvailable && planState && state.draft
@@ -96,6 +98,7 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
       <section className="border-t border-[var(--border-subtle)] px-5 py-6 md:px-7" aria-labelledby="sources-heading">
         <h3 id="sources-heading" className="text-base font-semibold">来源</h3><p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">{planState?.plan ? `当前方案已冻结 ${planState.sources.length} 条联网来源，可通过顶部“查看当前方案”进入来源详情。` : state.draft.webEnabled ? "尚未生成方案。生成时会检索并冻结可核验来源。" : "本次未开启联网查证，方案将只依据当前输入和参考资料生成。"}</p>
       </section>
+      {douyinPanel}
     </form> : state.loaded ? <div className="p-6" role="alert"><h2 id="input-stage-heading" className="text-lg font-semibold">创作输入暂不可用</h2><p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">请返回项目确认视频是否存在后重试。</p></div> : <p className="p-6 text-sm text-[var(--fg-secondary)]" role="status">正在读取创作输入草稿…</p>}
   </section>;
 }

@@ -1,6 +1,10 @@
 import { responseJson } from "../client-logic";
 import type { Project, ProjectCreativeSettings, ProjectSummary, Video, VideoInputDraft, VideoPlan, VideoPlanJob, VideoPlanSource, VideoScriptParagraph, VideoVisualDraft } from "./types";
 import type { VideoImageWorkspace } from "./image-logic";
+import type {
+  DouyinAnalysisConfig, DouyinAnalysisSelectionInput, DouyinAnalysisSummary,
+  DouyinCommentsPage, DouyinFramesResponse, DouyinReportResponse, DouyinTranscriptResponse,
+} from "./douyin-analysis/types";
 
 async function request<T>(url: string, init?: RequestInit) {
   return responseJson<T>(await fetch(url, init));
@@ -43,6 +47,14 @@ export const projectApi = {
   }),
   approveVideoImageCandidate: (projectId: string, videoId: string, visualId: string, candidateId: string, expectedGateRevision: number) => request<{ ok: true; message: string }>(`${videoUrl(projectId, videoId)}/visuals/${encodeURIComponent(visualId)}/image-approval`, json({ candidateId, expectedGateRevision }, "PUT")),
   cancelVideoImageBatch: (projectId: string, videoId: string, batchId: string) => request<{ ok: true; message: string }>(`${videoUrl(projectId, videoId)}/image-batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" }),
+  getDouyinAnalysis: (projectId: string, videoId: string, signal?: AbortSignal) => request<DouyinAnalysisSummary>(`${videoUrl(projectId, videoId)}/douyin-analysis`, { signal }),
+  createDouyinAnalysisJob: (projectId: string, videoId: string, config: DouyinAnalysisConfig) => request<{ ok: true; message: string }>(`${videoUrl(projectId, videoId)}/douyin-analysis/jobs`, json(config)),
+  cancelDouyinAnalysisJob: (projectId: string, videoId: string, jobId: string) => request<{ ok: true; message: string }>(`${videoUrl(projectId, videoId)}/douyin-analysis/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+  saveDouyinAnalysisSelection: (projectId: string, videoId: string, selection: DouyinAnalysisSelectionInput) => request<{ ok: true; message: string }>(`${videoUrl(projectId, videoId)}/douyin-analysis/selection`, json(selection, "PUT")),
+  getDouyinAnalysisReport: (projectId: string, videoId: string, snapshotId: string, signal?: AbortSignal) => request<DouyinReportResponse>(`${videoUrl(projectId, videoId)}/douyin-analysis/snapshots/${encodeURIComponent(snapshotId)}/report`, { signal }),
+  getDouyinAnalysisTranscript: (projectId: string, videoId: string, snapshotId: string, signal?: AbortSignal) => request<DouyinTranscriptResponse>(`${videoUrl(projectId, videoId)}/douyin-analysis/snapshots/${encodeURIComponent(snapshotId)}/transcript`, { signal }),
+  getDouyinAnalysisFrames: (projectId: string, videoId: string, snapshotId: string, signal?: AbortSignal) => request<DouyinFramesResponse>(`${videoUrl(projectId, videoId)}/douyin-analysis/snapshots/${encodeURIComponent(snapshotId)}/frames`, { signal }),
+  getDouyinAnalysisComments: (projectId: string, videoId: string, snapshotId: string, page: number, signal?: AbortSignal) => request<DouyinCommentsPage>(`${videoUrl(projectId, videoId)}/douyin-analysis/snapshots/${encodeURIComponent(snapshotId)}/comments?page=${page}&pageSize=10`, { signal }),
 };
 
 function videoUrl(projectId: string, videoId: string) {
