@@ -28,6 +28,15 @@ export type VideoPlanGeneratorSource = GenerateVideoPlan | { create: CreateVideo
 export type ResolveVideoPlanModel = (providerId: string) =>
   ChapterTextModelConfig | null | Promise<ChapterTextModelConfig | null>;
 
+function acceptsPartialAsr(row: { event_type: "accept_partial" | "confirm_rights"; missing_dimensions_json: string }) {
+  if (row.event_type !== "accept_partial") return false;
+  const missing = JSON.parse(row.missing_dimensions_json) as unknown;
+  if (!Array.isArray(missing) || missing.some((item) => typeof item !== "string")) {
+    throw new VideoPlanError(409, "抖音部分结果接受事件无效");
+  }
+  return missing.includes("asr");
+}
+
 export function enqueueVideoPlanJob(database: DatabaseSync, input: {
   projectId: string; videoId: string; idempotencyKey: unknown; config: ChapterTextModelConfig; now?: number;
 }) {
@@ -44,11 +53,13 @@ export function enqueueVideoPlanJob(database: DatabaseSync, input: {
   const douyin = selection ? (() => {
     const analysis = getDouyinAnalysisSnapshot(database, input.projectId, input.videoId, selection.snapshotId);
     const eventRows = database.prepare(
-      `SELECT event_type FROM video_douyin_analysis_selection_events
+      `SELECT event_type,missing_dimensions_json FROM video_douyin_analysis_selection_events
        WHERE video_id=? AND snapshot_id=? AND report_hash=?`,
-    ).all(input.videoId, analysis.id, analysis.reportHash) as Array<{ event_type: "accept_partial" | "confirm_rights" }>;
+    ).all(input.videoId, analysis.id, analysis.reportHash) as Array<{
+      event_type: "accept_partial" | "confirm_rights"; missing_dimensions_json: string;
+    }>;
     return buildFrozenDouyinPlanInput({ snapshot: analysis, selection,
-      acceptedPartial: eventRows.some((row) => row.event_type === "accept_partial"),
+      acceptedPartial: eventRows.some(acceptsPartialAsr),
       rightsEventConfirmed: eventRows.some((row) => row.event_type === "confirm_rights") });
   })() : null;
   const draft = { ...parsedDraft, webEnabled: douyin?.usageRole === "topic_seed" ? true : parsedDraft.webEnabled, douyin };

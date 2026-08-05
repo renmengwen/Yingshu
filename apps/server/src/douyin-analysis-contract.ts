@@ -31,6 +31,7 @@ export const DOUYIN_AVAILABILITY_DIMENSIONS = [
   "audioSubtitle", "audience", "narrationVisualAlignment",
 ] as const;
 export type DouyinAvailabilityDimension = typeof DOUYIN_AVAILABILITY_DIMENSIONS[number];
+export type DouyinAcceptedMissingDimension = DouyinAvailabilityDimension | "asr";
 
 export interface DimensionAvailability {
   status: "available" | "partial" | "unavailable";
@@ -80,7 +81,7 @@ export interface DouyinAnalysisSelectionInput {
   usageRole: DouyinUsageRole;
   creativeAngle: string;
   rightsConfirmed: boolean;
-  acceptedMissingDimensions: DouyinAvailabilityDimension[];
+  acceptedMissingDimensions: DouyinAcceptedMissingDimension[];
 }
 
 export class DouyinAnalysisContractError extends Error {
@@ -178,8 +179,9 @@ export function douyinAnalysisConfigHash(config: DouyinAnalysisConfig) {
 export function parseDouyinAnalysisSelection(raw: unknown): DouyinAnalysisSelectionInput {
   const value = object(raw, "抖音使用方式");
   exact(value, ["snapshotId", "usageRole", "creativeAngle", "rightsConfirmed", "acceptedMissingDimensions"], "抖音使用方式");
-  const dimensions = list(value.acceptedMissingDimensions, "接受的缺失项", DOUYIN_AVAILABILITY_DIMENSIONS.length,
-    (item) => enumeration(item, DOUYIN_AVAILABILITY_DIMENSIONS, "缺失维度"));
+  const acceptedDimensions = [...DOUYIN_AVAILABILITY_DIMENSIONS, "asr"] as const;
+  const dimensions = list(value.acceptedMissingDimensions, "接受的缺失项", acceptedDimensions.length,
+    (item) => enumeration(item, acceptedDimensions, "缺失维度"));
   if (new Set(dimensions).size !== dimensions.length) throw new DouyinAnalysisContractError(400, "接受的缺失项不能重复");
   const result: DouyinAnalysisSelectionInput = {
     snapshotId: text(value.snapshotId, "分析快照 ID", 100),

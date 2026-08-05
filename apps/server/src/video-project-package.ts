@@ -264,6 +264,7 @@ function pruneSnapshot(database: Database, projectId: string, videoId: string) {
         UNION SELECT job_id FROM video_image_candidates WHERE job_id IS NOT NULL
         UNION SELECT job_id FROM video_render_runs WHERE job_id IS NOT NULL
       );
+      DELETE FROM job_checkpoints;
       UPDATE jobs SET payload_json='{}', result_json=NULL, error_message=NULL;
     `);
     const legacy = database.prepare("SELECT (SELECT COUNT(*) FROM books)+(SELECT COUNT(*) FROM series_projects) AS count").get() as { count: number };

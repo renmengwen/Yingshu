@@ -1,5 +1,5 @@
 import type {
-  DouyinAnalysisConfig, DouyinAnalysisStatus, DouyinAvailabilityDimension,
+  DouyinAcceptedMissingDimension, DouyinAnalysisConfig, DouyinAnalysisStatus, DouyinAvailabilityDimension,
   DouyinEvidenceSummary, DouyinUsageRole,
 } from "./types";
 
@@ -38,6 +38,15 @@ export function unavailableDimensions(availability: Record<DouyinAvailabilityDim
   if (!availability) return [];
   return (Object.entries(availability) as Array<[DouyinAvailabilityDimension, { status: string }]>)
     .filter(([, item]) => item.status !== "available").map(([dimension]) => dimension);
+}
+
+export function acceptedMissingDimensions(
+  availability: Record<DouyinAvailabilityDimension, { status: string }> | null,
+  evidence: DouyinEvidenceSummary | null,
+): DouyinAcceptedMissingDimension[] {
+  const dimensions: DouyinAcceptedMissingDimension[] = unavailableDimensions(availability);
+  if (evidence?.asrStatus === "partial") dimensions.push("asr");
+  return dimensions;
 }
 
 export function evidenceRows(evidence: DouyinEvidenceSummary | null, config: DouyinAnalysisConfig) {

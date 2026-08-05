@@ -1,6 +1,7 @@
 export type DouyinUsageRole = "method_only" | "topic_seed" | "content_source";
 export type DouyinAnalysisStatus = "queued" | "running" | "need_login" | "need_verify" | "partial" | "succeeded" | "failed" | "cancelled";
 export type DouyinAvailabilityDimension = "content" | "narrative" | "pacing" | "visualOverall" | "visualOpening" | "audioSubtitle" | "audience" | "narrationVisualAlignment";
+export type DouyinAcceptedMissingDimension = DouyinAvailabilityDimension | "asr";
 
 export interface DouyinAnalysisConfig {
   sourceText: string;
@@ -78,7 +79,7 @@ export interface DouyinAnalysisSelectionInput {
   usageRole: DouyinUsageRole;
   creativeAngle: string;
   rightsConfirmed: boolean;
-  acceptedMissingDimensions: DouyinAvailabilityDimension[];
+  acceptedMissingDimensions: DouyinAcceptedMissingDimension[];
 }
 
 export interface DouyinReportResponse { ok: true; report: unknown }

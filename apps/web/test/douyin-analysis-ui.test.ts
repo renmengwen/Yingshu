@@ -6,7 +6,7 @@ import { renderToString } from "react-dom/server";
 
 import { projectApi } from "../src/projects/api.ts";
 import {
-  DOUYIN_STATUS_LABELS, douyinStatusMessage, evidenceRows, unavailableDimensions, usageRoleLabel,
+  acceptedMissingDimensions, DOUYIN_STATUS_LABELS, douyinStatusMessage, evidenceRows, unavailableDimensions, usageRoleLabel,
   validateDouyinDraft,
 } from "../src/projects/douyin-analysis/logic.ts";
 import { DEFAULT_DOUYIN_ANALYSIS_CONFIG, type DouyinAvailabilityDimension } from "../src/projects/douyin-analysis/types.ts";
@@ -44,6 +44,11 @@ test("三种使用方式固定且 partial 只提交真实缺失维度", () => {
   const availability = Object.fromEntries((["content", "narrative", "pacing", "visualOverall", "visualOpening", "audioSubtitle", "audience", "narrationVisualAlignment"] as DouyinAvailabilityDimension[])
     .map((dimension) => [dimension, { status: dimension === "pacing" ? "partial" : "available" }])) as Record<DouyinAvailabilityDimension, { status: string }>;
   assert.deepEqual(unavailableDimensions(availability), ["pacing"]);
+  assert.deepEqual(acceptedMissingDimensions(availability, {
+    metadataStatus: "succeeded", videoStatus: "succeeded", asrStatus: "partial", asrCoveredDurationMs: 1,
+    asrTextCharacters: 1, plannedFrames: 6, succeededFrames: 6, failedFrames: 0, commentCount: 0,
+    completeness: "partial",
+  }), ["pacing", "asr"]);
 });
 
 test("抖音分析 API 使用视频嵌套路由、严格配置和 selection 请求体", async () => {

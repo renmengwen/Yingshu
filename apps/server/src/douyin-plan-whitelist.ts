@@ -80,16 +80,32 @@ function conclusion(report: DouyinAnalysisReport, dimension: string) {
   return report.content?.observations.find((item) => item.dimension === dimension)?.conclusion ?? "";
 }
 
+const ABSTRACT_METHOD_PATTERNS = [
+  ["问题开场", /问题|提问|设问/u], ["结果前置", /结果前置|先给结果|结论前置/u],
+  ["冲突开场", /冲突|矛盾/u], ["利益承诺", /利益|收益|承诺/u], ["身份反转", /身份反转/u],
+  ["悬念推进", /悬念/u], ["分段解释", /解释|拆解|分段/u], ["举例说明", /举例|案例/u],
+  ["转折推进", /转折|反转/u], ["总结收束", /总结|收束|结尾/u], ["行动号召", /行动号召|CTA/u],
+  ["高密度画面", /高密度/u], ["低密度画面", /低密度/u], ["字幕辅助", /字幕/u],
+] as const;
+
+function abstractPatterns(values: readonly string[]) {
+  return ABSTRACT_METHOD_PATTERNS.filter(([, pattern]) => values.some((value) => pattern.test(value)))
+    .map(([label]) => label);
+}
+
 function methodPayload(report: DouyinAnalysisReport) {
+  const narrative = [...(report.narrative?.sections.flatMap((item) => [item.role, item.technique]) ?? []),
+    ...(report.narrative?.observations.map((item) => item.conclusion) ?? [])];
+  const visual = report.visual?.observations.map((item) => item.conclusion) ?? [];
   return {
     methodProfile: {
-      narrationPatterns: [...(report.narrative?.sections.map((item) => `${item.role}：${item.technique}`) ?? []),
-        ...(report.narrative?.observations.map((item) => item.conclusion) ?? [])],
+      // 自由文本只参与服务端分类，实际 Prompt 仅携带固定抽象标签，避免模型把人名、事件或原句藏入“方法”字段。
+      narrationPatterns: abstractPatterns(narrative),
       pacingMetrics: report.pacing?.metrics ?? {},
-      visualPatterns: report.visual?.observations.map((item) => item.conclusion) ?? [],
+      visualPatterns: abstractPatterns(visual),
     },
-    audienceNeeds: report.audience?.observations.map((item) => item.conclusion) ?? [],
-    audienceRisks: report.risks.map((item) => item.summary),
+    audienceNeeds: [],
+    audienceRisks: [],
   };
 }
 

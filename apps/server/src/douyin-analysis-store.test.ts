@@ -99,6 +99,17 @@ test("分析快照、选择事件、下游失效和重启恢复保持一致", as
       status: "succeeded", completeness: "complete", evidenceHash: "a".repeat(64), report: report(), completedAt: 4 });
     assert.ok(completed.reportHash);
 
+    const partialAsrReport = report();
+    partialAsrReport.evidence.asrStatus = "partial";
+    partialAsrReport.evidence.completeness = "partial";
+    updateDouyinAnalysisSnapshot(connection.database, { snapshotId: created.snapshot.id,
+      status: "partial", completeness: "partial", evidenceHash: "a".repeat(64), report: partialAsrReport, completedAt: 4 });
+    assert.throws(() => saveDouyinAnalysisSelection(connection.database, { projectId: project.id, videoId: video.id, now: 4,
+      selection: { snapshotId: completed.id, usageRole: "topic_seed", creativeAngle: "重新研究",
+        rightsConfirmed: false, acceptedMissingDimensions: [] } }), /明确接受包含 ASR 的部分结果/u);
+    updateDouyinAnalysisSnapshot(connection.database, { snapshotId: created.snapshot.id,
+      status: "succeeded", completeness: "complete", evidenceHash: "a".repeat(64), report: report(), completedAt: 4 });
+
     const reused = enqueueDouyinAnalysis(connection.database, { projectId: project.id, videoId: video.id,
       awemeId: "12345", sourceUrl: "https://www.douyin.com/video/12345", config, now: 5 });
     assert.equal(reused.reusable, true);

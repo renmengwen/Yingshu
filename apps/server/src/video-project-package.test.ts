@@ -46,6 +46,8 @@ async function fixture() {
     VALUES ('image-approval','project','video',1,'shot','candidate','plan',?,'script',?,'visual-revision',?,?,?,1)`).run(
       X("1"), X("2"), X("4"), X("5"), image.hash);
   db.prepare("INSERT INTO jobs(id,type,payload_json,status,run_after,created_at,updated_at) VALUES ('tts-job','tts','{\"secret\":\"remove\"}','succeeded',1,1,1),('render-job','render','{}','succeeded',1,1,1)").run();
+  db.prepare(`INSERT INTO job_checkpoints(job_id,stage,scope_key,input_hash,completed_at,output_json)
+    VALUES ('tts-job','fetch_metadata','snapshot',?,1,'{\"downloadUrl\":\"https://secret.invalid/video\",\"path\":\"D:\\\\private\\\\video.mp4\"}')`).run(X("9"));
   db.prepare(`INSERT INTO video_tts_snapshots(id,project_id,video_id,plan_snapshot_id,plan_snapshot_hash,script_revision_id,
     script_content_hash,paragraphs_json,provider_id,provider_name,provider_kind,protocol,base_url,model_id,voice_id,rate,language,
     params_json,target_duration_seconds,system_contract_version,canonical_json,snapshot_hash,created_at)
@@ -166,6 +168,7 @@ test("v26 Video 项目包恢复当前抖音证据且排除缓存和秘密", asyn
       assert.deepEqual(database.prepare("SELECT id FROM videos").all().map((row) => ({ ...row })), [{ id: "video" }]);
       assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0);
       assert.equal((database.prepare("SELECT payload_json FROM jobs WHERE id='tts-job'").get() as { payload_json: string }).payload_json, "{}");
+      assert.equal((database.prepare("SELECT COUNT(*) AS count FROM job_checkpoints").get() as { count: number }).count, 0);
       assert.deepEqual({ ...database.prepare(
         "SELECT snapshot_id,usage_role FROM video_douyin_analysis_selections WHERE video_id='video'",
       ).get() }, { snapshot_id: "snapshot", usage_role: "method_only" });

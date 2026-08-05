@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { projectApi } from "../api";
-import { unavailableDimensions, validateDouyinDraft } from "./logic";
+import { acceptedMissingDimensions, validateDouyinDraft } from "./logic";
 import {
   DEFAULT_DOUYIN_ANALYSIS_CONFIG, type DouyinAnalysisConfig, type DouyinAnalysisSummary,
   type DouyinUsageRole,
@@ -108,7 +108,9 @@ export function useDouyinAnalysis(projectId: string, videoId: string) {
   const cancel = () => summary?.job ? perform("正在中断抖音分析…", () => projectApi.cancelDouyinAnalysisJob(projectId, videoId, summary.job!.id), "分析中断请求已记录。已完成证据仍然保留。") : Promise.resolve();
   const saveSelection = () => summary?.snapshot ? perform("正在保存抖音使用方式…", () => projectApi.saveDouyinAnalysisSelection(projectId, videoId, {
     snapshotId: summary.snapshot!.id, usageRole, creativeAngle, rightsConfirmed: usageRole === "content_source" && rightsConfirmed,
-    acceptedMissingDimensions: acceptPartial ? unavailableDimensions(summary.snapshot!.availability) : [],
+    acceptedMissingDimensions: acceptPartial
+      ? acceptedMissingDimensions(summary.snapshot!.availability, summary.snapshot!.evidence)
+      : [],
   }), "抖音使用方式已保存。当前文案与画面方案已按服务端规则失效。") : Promise.resolve();
 
   return {

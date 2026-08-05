@@ -59,5 +59,6 @@ test("使用方式严格校验内容改写权利与缺失维度", () => {
     rightsConfirmed: false, acceptedMissingDimensions: ["audience"] };
   assert.equal(parseDouyinAnalysisSelection(base).usageRole, "method_only");
   assert.throws(() => parseDouyinAnalysisSelection({ ...base, acceptedMissingDimensions: ["audience", "audience"] }), /不能重复/u);
+  assert.deepEqual(parseDouyinAnalysisSelection({ ...base, acceptedMissingDimensions: ["asr"] }).acceptedMissingDimensions, ["asr"]);
   assert.throws(() => parseDouyinAnalysisSelection({ ...base, usageRole: "content_source" }), /必须确认/u);
 });

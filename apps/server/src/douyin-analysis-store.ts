@@ -259,14 +259,17 @@ export function saveDouyinAnalysisSelection(database: DatabaseSync, input: {
   if (target.invalidatedAt !== null || !target.reportHash || !target.report) {
     throw new DouyinAnalysisContractError(409, "当前抖音分析快照不可用于创作");
   }
-  if (input.selection.acceptedMissingDimensions.some((dimension) => target.report!.availability[dimension].status === "available")) {
+  if (input.selection.acceptedMissingDimensions.some((dimension) => dimension === "asr"
+    ? target.report!.evidence.asrStatus !== "partial"
+    : target.report!.availability[dimension].status === "available")) {
     throw new DouyinAnalysisContractError(400, "只能接受当前确实缺失或部分可用的分析维度");
   }
   const requiredDimensions = input.selection.usageRole === "method_only" ? ["narrative", "pacing"] as const : ["content"] as const;
   const blocked = requiredDimensions.filter((dimension) => target.report!.availability[dimension].status !== "available" &&
     !input.selection.acceptedMissingDimensions.includes(dimension));
   if (blocked.length) throw new DouyinAnalysisContractError(409, `使用方式缺少必要分析维度：${blocked.join("、")}`);
-  if (input.selection.usageRole !== "method_only" && !["succeeded", "partial"].includes(target.report.evidence.asrStatus)) {
+  if (input.selection.usageRole !== "method_only" && (!["succeeded", "partial"].includes(target.report.evidence.asrStatus)
+      || target.report.evidence.asrStatus === "partial" && !input.selection.acceptedMissingDimensions.includes("asr"))) {
     throw new DouyinAnalysisContractError(409, "该使用方式需要完整 ASR，或明确接受包含 ASR 的部分结果");
   }
   if (input.selection.usageRole === "topic_seed") {

@@ -21,19 +21,19 @@ function observation(dimension: string, conclusion: string) {
   return { dimension, conclusion, evidenceRefs: ["asr:0"], confidence: "high" as const, nature: "observation" as const };
 }
 
-function report(): DouyinAnalysisReport {
+function report(partialAsr = false): DouyinAnalysisReport {
   const available = { status: "available" as const, reason: "" };
   return {
     version: "yingshu-douyin-analysis-v1",
-    evidence: { metadataStatus: "succeeded", videoStatus: "succeeded", asrStatus: "succeeded",
+    evidence: { metadataStatus: "succeeded", videoStatus: "succeeded", asrStatus: partialAsr ? "partial" : "succeeded",
       asrCoveredDurationMs: 60_000, asrTextCharacters: 100, plannedFrames: 12, succeededFrames: 12,
       failedFrames: 0, commentCount: 1, evidenceHash: HASH, capturedAt: 1, analyzedAt: 2,
-      modelIdentity: "fixture", completeness: "complete" },
+      modelIdentity: "fixture", completeness: partialAsr ? "partial" : "complete" },
     availability: { content: available, narrative: available, pacing: available, visualOverall: available,
       visualOpening: available, audioSubtitle: available, audience: available, narrationVisualAlignment: available },
     content: { observations: [observation("topic", "冻结抖音选题"), observation("coreQuestion", "冻结核心问题"),
       observation("audienceAngle", "冻结受众角度"), observation("claim", "CLAIM_EVENT_7788")] },
-    narrative: { sections: [{ startMs: 0, endMs: 10_000, role: "开头", summary: "STRUCTURE_EVENT_7788",
+    narrative: { sections: [{ startMs: 0, endMs: 10_000, role: "问题开场", summary: "STRUCTURE_EVENT_7788",
       technique: "ABSTRACT_METHOD_HOOK", evidenceRefs: ["asr:0"] }], observations: [observation("narrative", "ABSTRACT_METHOD_ARC")] },
     pacing: { metrics: { questionRatio: 0.2 }, observations: [] },
     visual: { observations: [observation("visual", "ABSTRACT_VISUAL_DENSITY")] },
@@ -43,12 +43,12 @@ function report(): DouyinAnalysisReport {
   };
 }
 
-function manifest() {
+function manifest(partialAsr = false) {
   return {
     version: "yingshu-douyin-evidence-v1", evidenceHash: HASH,
     artifacts: [{ id: "secret-artifact", kind: "video", relativePath: "SECRET/PATH/video.mp4", bytes: 1, sha256: HASH,
       status: "succeeded" }],
-    transcript: { status: "succeeded", textHash: HASH, segments: [
+    transcript: { status: partialAsr ? "partial" : "succeeded", textHash: HASH, segments: [
       { id: "asr:0", startMs: 0, endMs: 10_000, text: "TRANSCRIPT_PERSON_7788", status: "succeeded" }], missingRanges: [] },
     frames: [{ artifactId: "secret-frame", timestampMs: 1_000 }],
     comments: { status: "succeeded", interpretationOnly: true, rawText: "RAW_COMMENT_7788" },
@@ -68,7 +68,7 @@ function visualOutput(prompt: string) {
     prompt: "vertical infographic", negativePrompt: "text", suggestedDurationSeconds: 30, weight: 1 })) };
 }
 
-async function runRole(role: DouyinUsageRole) {
+async function runRole(role: DouyinUsageRole, partialAsr = false) {
   const dataRoot = await mkdtemp(join(tmpdir(), `yingshu-douyin-${role}-`));
   const connection = openDatabase(dataRoot);
   const project = createProject(connection.database, { name: "测试项目" }, 1);
@@ -81,10 +81,11 @@ async function runRole(role: DouyinUsageRole) {
     config: { sourceText: "https://www.douyin.com/video/12345", extractFrames: true, frameCount: 12,
       transcribeAudio: true, analyzeComments: true }, now: 4 });
   const completed = updateDouyinAnalysisSnapshot(connection.database, { snapshotId: analysis.snapshot.id,
-    status: "succeeded", completeness: "complete", evidenceHash: HASH, report: report(), artifactManifest: manifest(), completedAt: 5 });
+    status: partialAsr ? "partial" : "succeeded", completeness: partialAsr ? "partial" : "complete",
+    evidenceHash: HASH, report: report(partialAsr), artifactManifest: manifest(partialAsr), completedAt: 5 });
   saveDouyinAnalysisSelection(connection.database, { projectId: project.id, videoId: video.id, now: 6,
     selection: { snapshotId: completed.id, usageRole: role, creativeAngle: "用户改写角度", rightsConfirmed: role === "content_source",
-      acceptedMissingDimensions: [] } });
+      acceptedMissingDimensions: partialAsr ? ["asr"] : [] } });
   enqueueVideoPlanJob(connection.database, { projectId: project.id, videoId: video.id,
     idempotencyKey: `plan-${role}`, config, now: 7 });
   const prompts: string[] = [];
@@ -107,7 +108,8 @@ test("三种使用方式的真实 provider prompt 只包含各自字段白名单
       const providerPayload = value.prompts.join("\n");
       assert.doesNotMatch(providerPayload, /SECRET\/PATH|secret-frame|RAW_COMMENT_7788/u);
       if (role === "method_only") {
-        assert.match(providerPayload, /ABSTRACT_METHOD_HOOK|ABSTRACT_METHOD_ARC/u);
+        assert.match(providerPayload, /问题开场/u);
+        assert.doesNotMatch(providerPayload, /ABSTRACT_METHOD_HOOK|ABSTRACT_METHOD_ARC|AUDIENCE_NEED_SUMMARY|UNCERTAINTY_SUMMARY/u);
         assert.doesNotMatch(providerPayload, /TRANSCRIPT_PERSON_7788|CLAIM_EVENT_7788|STRUCTURE_EVENT_7788|冻结抖音选题/u);
       } else if (role === "topic_seed") {
         assert.match(providerPayload, /冻结抖音选题|冻结核心问题|冻结受众角度|https:\/\/example\.com\/independent/u);
@@ -123,5 +125,15 @@ test("三种使用方式的真实 provider prompt 只包含各自字段白名单
       value.connection.close();
       await rm(value.dataRoot, { recursive: true, force: true });
     }
+  }
+});
+
+test("部分 ASR 必须由同一报告事件显式接受后才可进入实际 provider", async () => {
+  const value = await runRole("topic_seed", true);
+  try {
+    assert.match(value.prompts.join("\n"), /冻结抖音选题|https:\/\/example\.com\/independent/u);
+  } finally {
+    value.connection.close();
+    await rm(value.dataRoot, { recursive: true, force: true });
   }
 });
