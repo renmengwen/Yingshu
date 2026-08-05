@@ -22,6 +22,9 @@ import { BookLibraryError, cleanupPendingBookDeletions, listBooks, listChapters,
 import { registerBookRoutes } from "./book-routes.js";
 import { registerChapterRoutes } from "./chapter-routes.js";
 import { registerCreativeInputRoutes } from "./creative-input-routes.js";
+import { registerDouyinAnalysisRoutes } from "./douyin-analysis-routes.js";
+import { createConfiguredDouyinAnalysisJobHandler } from "./douyin-analysis-job.js";
+import { DOUYIN_ANALYSIS_JOB_TYPE } from "./douyin-analysis-contract.js";
 import { createVideoPlanGenerator } from "./video-plan-provider.js";
 import { registerVideoPlanRoutes } from "./video-plan-routes.js";
 import {
@@ -196,6 +199,7 @@ const TEXT_JOB_TYPES = new Set([
   EPISODE_RECOMMENDATION_JOB_TYPE,
   ASSET_PROMPT_DRAFT_JOB_TYPE,
   VIDEO_PLAN_JOB_TYPE,
+  DOUYIN_ANALYSIS_JOB_TYPE,
 ]);
 
 interface BuildAppOptions {
@@ -415,6 +419,9 @@ export function buildApp(options: BuildAppOptions = {}) {
   async function resolveCurrentVideoTtsRuntime() {
     return resolveRuntimeModelConfig("tts", await readModelConfig(dataRoot));
   }
+  async function resolveCurrentAsrRuntime() {
+    return resolveRuntimeModelConfig("asr", await readModelConfig(dataRoot));
+  }
   function frozenVideoTtsRuntime(snapshot: VideoTtsSnapshot): RuntimeModelConfig | null {
     if (snapshot.providerKind !== "edge-tts") return null;
     return {
@@ -531,6 +538,10 @@ export function buildApp(options: BuildAppOptions = {}) {
       } } : {},
     ),
     [VIDEO_RENDER_JOB_TYPE]: createVideoRenderJobHandler(connection.database, dataRoot),
+    [DOUYIN_ANALYSIS_JOB_TYPE]: createConfiguredDouyinAnalysisJobHandler(connection.database, dataRoot, {
+      resolveAsrRuntime: resolveCurrentAsrRuntime,
+      resolveTextProvider: () => resolveChapterTextProvider(),
+    }),
     ...(options.jobHandlers ?? {}),
   };
   const supportedJobTypes = new Set(Object.keys(jobHandlers));
@@ -630,6 +641,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   void app.register(registerModelConfigRoutes, { dataRoot });
   void app.register(registerProjectVideoRoutes, { database: connection.database, dataRoot });
   void app.register(registerCreativeInputRoutes, { database: connection.database });
+  void app.register(registerDouyinAnalysisRoutes, { database: connection.database });
   void app.register(registerVideoPlanRoutes, {
     database: connection.database,
     resolveTextModel: () => resolveChapterTextProvider(),
