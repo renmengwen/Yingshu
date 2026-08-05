@@ -12,7 +12,8 @@ import {
 } from "./VideoPromptInstructionsDialog";
 import type { useVideoPlan } from "./use-video-plan";
 
-const segmentClass = "focus-ring-proxy flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-border px-3 text-center text-sm font-medium has-data-[state=checked]:border-primary has-data-[state=checked]:bg-[var(--surface-selected)] has-data-[state=checked]:text-[var(--accent-strong)]";
+const segmentClass = "focus-ring-proxy flex min-h-11 w-full cursor-pointer items-center justify-center rounded-md border border-border px-3 text-center text-sm font-medium has-data-[state=checked]:border-primary has-data-[state=checked]:bg-[var(--surface-selected)] has-data-[state=checked]:text-[var(--accent-strong)]";
+const hiddenRadioClass = "sr-only absolute! size-px!";
 
 export function VideoInputStage({ projectId, videoId, planState, onPlanStarted }: { projectId: string; videoId: string; planState: ReturnType<typeof useVideoPlan>; onPlanStarted: () => void }) {
   const state = useVideoInput(projectId, videoId);
@@ -45,13 +46,13 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
       </header>
 
       <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <section className="grid min-w-0 gap-7 p-5 md:p-7" aria-labelledby="creative-input-heading">
+        <section className="grid min-w-0 content-start gap-7 p-5 md:p-7" aria-labelledby="creative-input-heading">
           <div><h3 id="creative-input-heading" className="text-base font-semibold">创作内容</h3><p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">选择创作起点，并提供生成旁白所需的核心内容。</p></div>
           <FieldSet disabled={state.busy}>
             <FieldLegend className="mb-0" variant="label">输入方式</FieldLegend>
             <FieldDescription id="input-mode-help">切换方式会保留另一个模式中已经填写的内容。</FieldDescription>
             <RadioGroup className="grid max-w-lg grid-cols-2 gap-2" name="input-mode" aria-describedby="input-mode-help" value={state.draft.inputMode} onValueChange={(value) => update("inputMode", value as VideoInputDraft["inputMode"])}>
-              {([['topic', '根据主题创作'], ['body', '根据正文改编']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className="sr-only" value={value} /><span>{label}</span></FieldLabel>)}
+              {([['topic', '根据主题创作'], ['body', '根据正文改编']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={value} /><span>{label}</span></FieldLabel>)}
             </RadioGroup>
           </FieldSet>
 
@@ -74,7 +75,7 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
             {state.draft.referenceText.trim() ? <FieldSet disabled={state.busy}>
               <FieldLegend className="mb-0" variant="label">参考资料用途</FieldLegend>
               <RadioGroup className="grid gap-2 sm:grid-cols-2" name="reference-role" value={state.draft.referenceRole} onValueChange={(value) => update("referenceRole", value as VideoInputDraft["referenceRole"])}>
-                {([['style_only', '只参考表达风格'], ['content_source', '作为内容资料']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className="sr-only" value={value} /><span>{label}</span></FieldLabel>)}
+                {([['style_only', '只参考表达风格'], ['content_source', '作为内容资料']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={value} /><span>{label}</span></FieldLabel>)}
               </RadioGroup>
             </FieldSet> : null}
           </div>
@@ -86,13 +87,13 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
             <FieldLegend className="mb-0" variant="label">目标时长</FieldLegend>
             <FieldDescription>时长会影响旁白篇幅和预计画面数量。</FieldDescription>
             <RadioGroup className="grid grid-cols-2 gap-2" name="duration" value={String(state.draft.targetDurationSeconds)} onValueChange={(value) => update("targetDurationSeconds", Number(value))}>
-              {([[60, '1 分钟'], [180, '3 分钟'], [300, '5 分钟'], [600, '10 分钟']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className="sr-only" value={String(value)} /><span>{label}</span></FieldLabel>)}
+              {([[60, '1 分钟'], [180, '3 分钟'], [300, '5 分钟'], [600, '10 分钟']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={String(value)} /><span>{label}</span></FieldLabel>)}
             </RadioGroup>
           </FieldSet>
           <FieldSet disabled={state.busy}>
             <FieldLegend className="mb-0" variant="label">画面节奏</FieldLegend>
             <RadioGroup className="grid grid-cols-3 gap-2" name="visual-density" value={state.draft.visualDensity} onValueChange={(value) => update("visualDensity", value as VideoInputDraft["visualDensity"])}>
-              {([['relaxed', '舒缓'], ['standard', '标准'], ['compact', '紧凑']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className="sr-only" value={value} /><span>{label}</span></FieldLabel>)}
+              {([['relaxed', '舒缓'], ['standard', '标准'], ['compact', '紧凑']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={value} /><span>{label}</span></FieldLabel>)}
             </RadioGroup>
             <FieldDescription>{state.draft.visualDensity === "relaxed" ? "单张画面停留更久。" : state.draft.visualDensity === "compact" ? "画面切换更频繁。" : "适合大多数讲解视频。"}</FieldDescription>
           </FieldSet>
