@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>映述 · 生图画风预设</title>
+  <link rel="stylesheet" href="../../design-systems/yingshu-product/tokens/colors_and_type.css" />
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:var(--surface-canvas);color:var(--fg-primary);font:var(--body-size)/var(--body-leading) var(--font-sans)}button{font:inherit}.shell{width:min(1100px,calc(100% - 32px));margin:24px auto;background:var(--surface-primary);border:1px solid var(--border-subtle)}header{padding:24px;border-bottom:1px solid var(--border-subtle)}h1,h2,p{margin:0}h1{margin-top:6px;font-size:var(--h1-size)}.eyebrow{color:var(--accent-primary);font:620 var(--text-11) var(--font-mono);letter-spacing:.12em}.muted{margin-top:6px;color:var(--fg-secondary)}.layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}.content,.settings{padding:24px}.settings{border-left:1px solid var(--border-subtle);background:var(--surface-secondary)}h2{font-size:var(--h3-size)}.styles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.style{min-height:44px;padding:9px 12px;border:1px solid var(--border-subtle);border-radius:var(--radius-md);background:var(--surface-primary);color:var(--fg-primary);font-weight:620}.style[aria-pressed=true]{border-color:var(--accent-primary);background:var(--surface-selected);color:var(--accent-primary)}.style:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}.none{grid-column:1/-1}.summary{margin-top:20px;padding:14px;background:var(--surface-primary);border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}.summary strong{display:block}.summary p{margin-top:4px;color:var(--fg-secondary)}.placeholder{min-height:280px;padding:18px;border:1px dashed var(--border-strong);color:var(--fg-muted)}@media(max-width:720px){.layout{grid-template-columns:1fr}.settings{border-top:1px solid var(--border-subtle);border-left:0}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><p class="eyebrow">阶段 01</p><h1>输入与来源</h1><p class="muted">准备本次视频的创作内容和制作要求。</p></header>
+    <div class="layout">
+      <section class="content"><div class="placeholder">创作内容区</div></section>
+      <aside class="settings" aria-labelledby="style-heading">
+        <h2 id="style-heading">生图画风</h2>
+        <p class="muted">选择基础画风；更细的色彩、构图和禁用项可在高级设置中补充。</p>
+        <div class="styles" role="group" aria-label="生图画风预设">
+          <button class="style" type="button" aria-pressed="true">写实摄影</button><button class="style" type="button" aria-pressed="false">电影纪实</button>
+          <button class="style" type="button" aria-pressed="false">日系动漫</button><button class="style" type="button" aria-pressed="false">国风插画</button>
+          <button class="style" type="button" aria-pressed="false">扁平矢量</button><button class="style" type="button" aria-pressed="false">手绘线稿</button>
+          <button class="style" type="button" aria-pressed="false">3D 卡通</button><button class="style" type="button" aria-pressed="false">复古拼贴</button>
+          <button class="style none" type="button" aria-pressed="false">不使用预设</button>
+        </div>
+        <div class="summary"><strong>当前画风：写实摄影</strong><p>预设将随草稿保存，并进入之后的画面方案和生图提示词。</p></div>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

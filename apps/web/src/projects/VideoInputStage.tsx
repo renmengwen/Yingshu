@@ -6,7 +6,10 @@ import { Textarea } from "../components/ui/textarea";
 import type { VideoInputDraft } from "./types";
 import { useVideoInput } from "./use-video-input";
 import { videoPlanLaunchBlockReason, VideoPlanLauncher } from "./VideoPlanLauncher";
-import { promptInstructionsStatus, VideoPromptInstructionsDialog } from "./VideoPromptInstructionsDialog";
+import {
+  applyVisualStylePreset, promptInstructionsStatus, selectedVisualStylePreset,
+  VideoPromptInstructionsDialog, VISUAL_STYLE_PRESETS,
+} from "./VideoPromptInstructionsDialog";
 import type { useVideoPlan } from "./use-video-plan";
 
 const segmentClass = "focus-ring-proxy flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-border px-3 text-center text-sm font-medium has-data-[state=checked]:border-primary has-data-[state=checked]:bg-[var(--surface-selected)] has-data-[state=checked]:text-[var(--accent-strong)]";
@@ -21,6 +24,8 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
   const launchAvailable = Boolean(planState && state.draft && !planState.plan && (!planState.job || planState.job.status === "failed" || planState.job.status === "cancelled"));
   const launchBlockReason = launchAvailable && planState && state.draft
     ? videoPlanLaunchBlockReason(state.draft, state.dirty, state.busy || planState.busy, planState.modelAvailable) : null;
+  const visualInstructions = state.draft?.visualInstructions ?? "";
+  const visualStylePreset = selectedVisualStylePreset(visualInstructions);
 
   return <section className="min-w-0" aria-labelledby="input-stage-heading">
     {state.draft ? <form id="video-input-form" aria-describedby="video-input-status" onSubmit={(event) => { event.preventDefault(); void state.save(); }}>
@@ -90,6 +95,29 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
               {([['relaxed', '舒缓'], ['standard', '标准'], ['compact', '紧凑']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className="sr-only" value={value} /><span>{label}</span></FieldLabel>)}
             </RadioGroup>
             <FieldDescription>{state.draft.visualDensity === "relaxed" ? "单张画面停留更久。" : state.draft.visualDensity === "compact" ? "画面切换更频繁。" : "适合大多数讲解视频。"}</FieldDescription>
+          </FieldSet>
+          <FieldSet disabled={state.busy}>
+            <FieldLegend className="mb-0" variant="label">生图画风</FieldLegend>
+            <FieldDescription id="video-visual-style-help">选择基础画风；更细的色彩、构图和禁用项可在高级设置中补充。</FieldDescription>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-describedby="video-visual-style-help" aria-label="生图画风预设">
+              {VISUAL_STYLE_PRESETS.map((preset) => <Button
+                key={preset.id}
+                type="button"
+                variant="outline"
+                className={`${segmentClass} h-auto whitespace-normal py-2`}
+                aria-pressed={visualStylePreset === preset.id}
+                data-state={visualStylePreset === preset.id ? "checked" : "unchecked"}
+                onClick={() => update("visualInstructions", applyVisualStylePreset(visualInstructions, preset.id))}
+              >{preset.label}</Button>)}
+              <Button
+                type="button"
+                variant="outline"
+                className={`${segmentClass} col-span-2 h-auto whitespace-normal py-2`}
+                aria-pressed={visualStylePreset === null}
+                data-state={visualStylePreset === null ? "checked" : "unchecked"}
+                onClick={() => update("visualInstructions", applyVisualStylePreset(visualInstructions, null))}
+              >不使用预设</Button>
+            </div>
           </FieldSet>
           <div><h4 className="text-sm font-medium">输出规格</h4><p className="mt-2 font-mono text-sm">竖屏 · 9:16</p><p className="mt-1 font-mono text-xs text-[var(--fg-tertiary)]">1080 × 1920</p></div>
           <FieldLabel className="flex w-full cursor-pointer items-start gap-3">

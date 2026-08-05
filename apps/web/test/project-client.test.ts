@@ -13,7 +13,7 @@ import {
   VideoPlanLauncher, videoPlanLaunchBlockReason, videoPlanLaunchConfirmation,
 } from "../src/projects/VideoPlanLauncher.tsx";
 import {
-  instructionLimitMessage, promptInstructionsStatus,
+  applyVisualStylePreset, instructionLimitMessage, promptInstructionsStatus, selectedVisualStylePreset,
 } from "../src/projects/VideoPromptInstructionsDialog.tsx";
 import { VideoStageNavigation } from "../src/projects/VideoStageNavigation.tsx";
 
@@ -98,6 +98,11 @@ test("提示词层级身份固定且输入页呈现创作主次、可见操作�
   assert.match(html, /10 分钟/);
   assert.match(html, /竖屏 · 9:16/);
   assert.match(html, /1080 × 1920/);
+  assert.match(html, /生图画风/);
+  assert.match(html, /写实摄影/);
+  assert.match(html, /日系动漫/);
+  assert.match(html, /手绘线稿/);
+  assert.match(html, /不使用预设/);
   assert.match(html, /当前视频提示词补充/);
   assert.match(html, /已设置：文案、画面/);
   assert.match(html, /编辑提示词/);
@@ -135,6 +140,20 @@ test("生成确认摘要明确展示冻结配置、执行步骤和下游边界",
 test("提示词补充在两万字边界内可应用，超限时给出明确删除字数", () => {
   assert.equal(instructionLimitMessage("字".repeat(20_000)), null);
   assert.match(instructionLimitMessage("字".repeat(20_001)) ?? "", /请删除 1 字/);
+});
+
+test("生图画风预设只替换托管首行并保留用户补充", () => {
+  const realistic = applyVisualStylePreset("避免文字和水印。", "realistic");
+  assert.match(realistic, /^【画风预设：写实摄影】/u);
+  assert.match(realistic, /避免文字和水印。/u);
+  assert.equal(selectedVisualStylePreset(realistic), "realistic");
+
+  const anime = applyVisualStylePreset(realistic, "anime");
+  assert.match(anime, /^【画风预设：日系动漫】/u);
+  assert.doesNotMatch(anime, /画风预设：写实摄影/u);
+  assert.match(anime, /避免文字和水印。/u);
+  assert.equal(promptInstructionsStatus("", anime), "已设置：画面（日系动漫）");
+  assert.equal(applyVisualStylePreset(anime, null), "避免文字和水印。");
 });
 
 test("方案编辑校验稳定段落关系并只允许运行中任务取消", () => {

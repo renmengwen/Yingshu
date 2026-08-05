@@ -181,3 +181,20 @@ export function getVideo(database: DatabaseSync, projectId: string, videoId: str
   }
   return videoResult(row);
 }
+
+export function deleteVideo(database: DatabaseSync, projectId: string, videoId: string, now = Date.now()) {
+  const video = getVideo(database, projectId, videoId);
+  const project = getProject(database, projectId);
+  const updatedAt = Math.max(now, project.updatedAt + 1);
+
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.prepare("DELETE FROM videos WHERE id = ? AND project_id = ?").run(video.id, project.id);
+    database.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, project.id);
+    database.exec("COMMIT");
+  } catch (error) {
+    try { database.exec("ROLLBACK"); } catch { /* 保留原始删除错误。 */ }
+    throw error;
+  }
+  return video;
+}

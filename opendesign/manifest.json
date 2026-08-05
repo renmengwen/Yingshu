@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-04T22:25:34.1378698+08:00",
+  "generated": "2026-08-05T07:39:55.0022774+08:00",
   "sections": [
     {
       "id": "mockups",
@@ -15,6 +15,12 @@
           "slug": "yingshu-plan-review",
           "files": [
             { "label": "index.html", "path": "mockups/yingshu-plan-review/index.html" }
+          ]
+        },
+        {
+          "slug": "yingshu-visual-style-presets",
+          "files": [
+            { "label": "index.html", "path": "mockups/yingshu-visual-style-presets/index.html" }
           ]
         }
       ]

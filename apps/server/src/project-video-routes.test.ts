@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import Fastify from "fastify";
 
@@ -89,6 +89,49 @@ test("HTTP 边界拒绝额外字段、非法归属并级联删除项目视频", 
     assert.equal((await app.inject({
       method: "GET", url: `/api/projects/${first.id}/videos/${video.id}`,
     })).statusCode, 404);
+  } finally {
+    await app.close();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("DELETE 视频会校验项目归属并删除数据库记录、配音、渲染和成片文件", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-video-delete-"));
+  const app = buildProjectApp(dataRoot);
+  try {
+    const project = (await app.inject({
+      method: "POST", url: "/api/projects", payload: { name: "删除测试项目" },
+    })).json().project as { id: string };
+    const other = (await app.inject({
+      method: "POST", url: "/api/projects", payload: { name: "其他项目" },
+    })).json().project as { id: string };
+    const video = (await app.inject({
+      method: "POST", url: `/api/projects/${project.id}/videos`, payload: { title: "待删除视频" },
+    })).json().video as { id: string };
+    const ttsFile = join(dataRoot, "video-tts", video.id, "audio.wav");
+    const finalFile = join(dataRoot, "videos", video.id, "renders", "final", "video.mp4");
+    await mkdir(dirname(ttsFile), { recursive: true });
+    await mkdir(dirname(finalFile), { recursive: true });
+    await writeFile(ttsFile, "audio");
+    await writeFile(finalFile, "video");
+
+    const crossed = await app.inject({
+      method: "DELETE", url: `/api/projects/${other.id}/videos/${video.id}`,
+    });
+    assert.equal(crossed.statusCode, 404);
+    await access(ttsFile);
+    await access(finalFile);
+
+    const deleted = await app.inject({
+      method: "DELETE", url: `/api/projects/${project.id}/videos/${video.id}`,
+    });
+    assert.equal(deleted.statusCode, 200);
+    assert.match(deleted.json().message, /全部内容已永久删除/u);
+    assert.equal((await app.inject({
+      method: "GET", url: `/api/projects/${project.id}/videos`,
+    })).json().items.length, 0);
+    await assert.rejects(access(ttsFile), { code: "ENOENT" });
+    await assert.rejects(access(finalFile), { code: "ENOENT" });
   } finally {
     await app.close();
     await rm(dataRoot, { recursive: true, force: true });

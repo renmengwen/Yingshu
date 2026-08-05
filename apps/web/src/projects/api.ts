@@ -20,6 +20,7 @@ export const projectApi = {
   listVideos: (projectId: string, signal?: AbortSignal) => request<{ ok: true; items: Video[] }>(`/api/projects/${encodeURIComponent(projectId)}/videos`, { signal }),
   createVideo: (projectId: string, title: string) => request<{ ok: true; video: Video }>(`/api/projects/${encodeURIComponent(projectId)}/videos`, json({ title })),
   getVideo: (projectId: string, videoId: string, signal?: AbortSignal) => request<{ ok: true; video: Video }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`, { signal }),
+  deleteVideo: (projectId: string, videoId: string) => request<{ ok: true; message: string }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" }),
   getSettings: (projectId: string, signal?: AbortSignal) => request<{ ok: true; settings: ProjectCreativeSettings }>(`/api/projects/${encodeURIComponent(projectId)}/settings`, { signal }),
   saveSettings: (projectId: string, settings: Pick<ProjectCreativeSettings, "scriptInstructions" | "visualInstructions">) => request<{ ok: true; settings: ProjectCreativeSettings }>(`/api/projects/${encodeURIComponent(projectId)}/settings`, json(settings, "PUT")),
   getVideoInput: (projectId: string, videoId: string, signal?: AbortSignal) => request<{ ok: true; input: VideoInputDraft }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/input`, { signal }),

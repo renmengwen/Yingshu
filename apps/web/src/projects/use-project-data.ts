@@ -103,7 +103,25 @@ export function useProject(projectId: string) {
     }
   }
 
-  return { project, videos, loaded, status, busy, createVideo };
+  async function removeVideo(video: Video) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setStatus(`正在永久删除视频“${video.title}”及其全部内容…`);
+    try {
+      const body = await projectApi.deleteVideo(projectId, video.id);
+      setVideos((current) => current?.filter((item) => item.id !== video.id));
+      setStatus(body.message || `视频“${video.title}”及其全部内容已永久删除。`);
+    } catch (error) {
+      setStatus(`视频删除失败：${(error as Error).message}。请重试。`);
+      throw error;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  return { project, videos, loaded, status, busy, createVideo, removeVideo };
 }
 
 export function useVideo(projectId: string, videoId: string) {
