@@ -449,6 +449,33 @@ function pageState(title: string, url: string, body: string): DouyinSourceFailur
   return null;
 }
 
+function hasDouyinLogin(cookies: Cookie[]) {
+  return cookies.some((cookie) => cookie.name === "sessionid" || cookie.name === "LOGIN_STATUS");
+}
+
+async function waitForDouyinLoginInSession(dataRoot: string, session: DouyinChromeSession, options: {
+  timeoutMs?: number;
+  pollMs?: number;
+  signal?: AbortSignal;
+}) {
+  await session.page.goto("https://www.douyin.com/", { waitUntil: "domcontentloaded", timeout: 20_000 });
+  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  while (Date.now() < deadline) {
+    if (options.signal?.aborted) throw new DouyinSourceError("timeout", "等待抖音登录已中断");
+    const cookies = await session.context.cookies("https://www.douyin.com");
+    if (hasDouyinLogin(cookies)) {
+      await saveDouyinCookies(dataRoot, cookies);
+      return;
+    }
+    const state = pageState(await session.page.title(), session.page.url(),
+      await session.page.locator("body").innerText().catch(() => ""));
+    if (state === "need_verify") throw new DouyinSourceError("need_verify", "抖音需要完成验证后才能继续");
+    if (state === "platform_blocked") throw new DouyinSourceError("platform_blocked", "抖音平台阻止了登录页面");
+    await session.page.waitForTimeout(options.pollMs ?? 500);
+  }
+  throw new DouyinSourceError("timeout", "等待抖音登录超时");
+}
+
 export async function waitForVisibleDouyinLogin(dataRoot: string, options: {
   chromePath?: string;
   timeoutMs?: number;
@@ -457,23 +484,9 @@ export async function waitForVisibleDouyinLogin(dataRoot: string, options: {
   sessionFactory?: typeof openVisibleDouyinChrome;
 } = {}) {
   const session = await (options.sessionFactory ?? openVisibleDouyinChrome)(dataRoot, { chromePath: options.chromePath });
-  const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
   try {
-    await session.page.goto("https://www.douyin.com/", { waitUntil: "domcontentloaded", timeout: 20_000 });
-    while (Date.now() < deadline) {
-      if (options.signal?.aborted) throw new DouyinSourceError("timeout", "等待抖音登录已中断");
-      const cookies = await session.context.cookies("https://www.douyin.com");
-      if (cookies.some((cookie) => cookie.name === "sessionid" || cookie.name === "LOGIN_STATUS")) {
-        await saveDouyinCookies(dataRoot, cookies);
-        return { status: "succeeded" as const };
-      }
-      const state = pageState(await session.page.title(), session.page.url(),
-        await session.page.locator("body").innerText().catch(() => ""));
-      if (state === "need_verify") throw new DouyinSourceError("need_verify", "抖音需要完成验证后才能继续");
-      if (state === "platform_blocked") throw new DouyinSourceError("platform_blocked", "抖音平台阻止了登录页面");
-      await session.page.waitForTimeout(options.pollMs ?? 500);
-    }
-    throw new DouyinSourceError("timeout", "等待抖音登录超时");
+    await waitForDouyinLoginInSession(dataRoot, session, options);
+    return { status: "succeeded" as const };
   } finally {
     await session.close();
   }
@@ -482,6 +495,12 @@ export async function waitForVisibleDouyinLogin(dataRoot: string, options: {
 export async function fetchDouyinVideoDetail(dataRoot: string, awemeId: string, options: {
   chromePath?: string;
   navigationTimeoutMs?: number;
+  loginTimeoutMs?: number;
+  loginPollMs?: number;
+  detailTimeoutMs?: number;
+  signal?: AbortSignal;
+  onLoginRequired?: () => void;
+  onLoginSucceeded?: () => void;
   sessionFactory?: typeof openVisibleDouyinChrome;
 } = {}): Promise<DouyinVideoDetail> {
   if (!AWEME_ID.test(awemeId)) throw new DouyinSourceError("parse_failed", "抖音视频 ID 无效");
@@ -492,19 +511,38 @@ export async function fetchDouyinVideoDetail(dataRoot: string, awemeId: string, 
       if (captured || !response.url().includes("/aweme/v1/web/aweme/detail/")) return;
       try { captured = await response.json(); } catch { /* 页面状态统一处理 */ }
     });
-    try {
-      await session.page.goto(`https://www.douyin.com/video/${awemeId}`, {
-        waitUntil: "domcontentloaded", timeout: options.navigationTimeoutMs ?? 20_000,
-      });
-      await session.page.waitForTimeout(1_000);
-    } catch (error) {
-      if ((error as Error).name === "TimeoutError") throw new DouyinSourceError("timeout", "获取抖音详情超时", { cause: error });
-      throw new DouyinSourceError("platform_blocked", "抖音详情页面无法访问", { cause: error });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (options.signal?.aborted) throw new DouyinSourceError("timeout", "获取抖音详情已中断");
+      captured = undefined;
+      try {
+        await session.page.goto(`https://www.douyin.com/video/${awemeId}`, {
+          waitUntil: "domcontentloaded", timeout: options.navigationTimeoutMs ?? 20_000,
+        });
+        const deadline = Date.now() + (options.detailTimeoutMs ?? 5_000);
+        while (!captured && Date.now() < deadline) {
+          if (options.signal?.aborted) throw new DouyinSourceError("timeout", "获取抖音详情已中断");
+          await session.page.waitForTimeout(Math.min(250, Math.max(1, deadline - Date.now())));
+        }
+      } catch (error) {
+        if (error instanceof DouyinSourceError) throw error;
+        if ((error as Error).name === "TimeoutError") throw new DouyinSourceError("timeout", "获取抖音详情超时", { cause: error });
+        throw new DouyinSourceError("platform_blocked", "抖音详情页面无法访问", { cause: error });
+      }
+      if (captured) return parseDouyinVideoDetail(captured);
+      const state = pageState(await session.page.title(), session.page.url(), await session.page.locator("body").innerText().catch(() => ""));
+      const loggedIn = hasDouyinLogin(await session.context.cookies("https://www.douyin.com"));
+      if (attempt === 0 && (state === "need_login" || !loggedIn)) {
+        options.onLoginRequired?.();
+        await waitForDouyinLoginInSession(dataRoot, session, {
+          timeoutMs: options.loginTimeoutMs, pollMs: options.loginPollMs, signal: options.signal,
+        });
+        options.onLoginSucceeded?.();
+        continue;
+      }
+      if (state) throw new DouyinSourceError(state, state === "need_login" ? "需要在可见 Chrome 中登录抖音"
+        : state === "need_verify" ? "抖音需要完成验证后才能继续" : "抖音平台阻止了详情请求");
+      throw new DouyinSourceError("parse_failed", "抖音详情响应无法解析");
     }
-    if (captured) return parseDouyinVideoDetail(captured);
-    const state = pageState(await session.page.title(), session.page.url(), await session.page.locator("body").innerText().catch(() => ""));
-    if (state) throw new DouyinSourceError(state, state === "need_login" ? "需要在可见 Chrome 中登录抖音"
-      : state === "need_verify" ? "抖音需要完成验证后才能继续" : "抖音平台阻止了详情请求");
     throw new DouyinSourceError("parse_failed", "抖音详情响应无法解析");
   } finally {
     await session.close();

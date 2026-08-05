@@ -27,6 +27,16 @@ export const DOUYIN_ANALYSIS_SYSTEM_VERSION = "yingshu-douyin-analysis-system-v1
 const MAX_PROMPT_BYTES = 512 * 1024;
 const MAX_TRANSCRIPT_SEGMENTS = 5_000;
 const MAX_COMMENT_SAMPLES = 300;
+const OUTPUT_SCHEMA = "{version:'yingshu-douyin-analysis-v1',evidence:frozenEvidenceSummary," +
+  "availability:{content|narrative|pacing|visualOverall|visualOpening|audioSubtitle|audience|narrationVisualAlignment:" +
+  "{status:'available'|'partial'|'unavailable',reason:string}}," +
+  "content|visual|audioSubtitle:null|{observations:Observation[]}," +
+  "narrative:null|{sections:[{startMs:number,endMs:number,role:string,summary:string,technique:string,evidenceRefs:string[]}],observations:Observation[]}," +
+  "pacing:null|{metrics:deterministicMetrics,observations:Observation[]}," +
+  "audience:null|{interpretationOnly:true,observations:Observation[]},observations:Observation[]," +
+  "risks:[{code:string,summary:string,evidenceRefs:string[]}]}；" +
+  "Observation={dimension:string,conclusion:string,evidenceRefs:string[],confidence:'high'|'medium'|'low'," +
+  "nature:'observation'|'inference'|'unknown'}";
 
 export interface DouyinTranscriptSegment {
   evidenceRef: string;
@@ -296,17 +306,20 @@ function validateProviderInput(input: DouyinAnalysisProviderInput) {
   }
 }
 
-function buildPrompt(payload: ReturnType<typeof promptPayload>) {
+function buildPrompt(payload: ReturnType<typeof promptPayload>, correction?: string) {
   return [
     "你是映述的单条抖音视频证据分析器。只输出严格 JSON 对象，不要 Markdown、代码围栏或解释。",
     `系统合同版本：${DOUYIN_ANALYSIS_SYSTEM_VERSION}；Prompt 版本：${DOUYIN_ANALYSIS_PROMPT_VERSION}。`,
     "顶层字段必须且只能是 version,evidence,availability,content,narrative,pacing,visual,audioSubtitle,audience,observations,risks。",
+    `唯一允许的输出 schema（竖线表示同类字段，不是实际字段名；所有对象不得增加 schema 外字段）：${OUTPUT_SCHEMA}`,
+    "version 必须是固定字符串 yingshu-douyin-analysis-v1，不得输出版本对象；availability 每项必须是 {status,reason}；confidence 必须是枚举字符串而不是数值。",
     "完整遵守 yingshu-douyin-analysis-v1：每条非纯数值结论必须有 evidenceRefs、confidence、nature，且引用只能来自 validEvidenceRefs。",
     "只描述本视频观察到的特征，不推断博主、作者或账号的长期稳定风格；不得生成爆款、原创度、抄袭度、账号或综合评分。",
     "inference 至少引用两条证据；若只能引用一条，conclusion 必须明确说明单一证据限制。unknown 不得引用证据。",
     "pacing.metrics 必须逐字复用 deterministicMetrics；evidence 必须逐字复用 frozenEvidenceSummary，不得估算或改写。",
     "comments 为 null 时 audience=null 且 audience availability=unavailable；评论存在时 interpretationOnly 必须为 true，评论纠正只进入待核验风险。",
     "frameObservations 为空时 visual=null，visualOverall/visualOpening/narrationVisualAlignment 均为 unavailable；有限静态帧不得写成逐帧运动事实。",
+    ...(correction ? [`上一次完整 JSON 未通过严格合同：${correction}`, "只纠正输出结构和合同字段，不改变下方冻结证据与确定性指标；重新输出完整 JSON。"] : []),
     "所有数组保持有界、文本简洁。输出 JSON：",
     JSON.stringify(payload),
   ].join("\n");
@@ -341,11 +354,15 @@ export function createDouyinAnalysisProvider(config: ChapterTextModelConfig, fet
       transcriptStrategy: transcript.strategy,
       omittedTranscriptRanges: transcript.omittedRanges,
     };
-    const request = textModelRequest(config, prompt, 16_384, true);
-    let statistics: TextModelStreamStatistics | undefined;
-    let raw: string | undefined;
-    try {
-      raw = await withTextModelTimeout(async (signal, activity) => textModelConcurrencyGate.run(signal, async () => {
+    const callModel = async (modelPrompt: string, stage: string) => {
+      if (Buffer.byteLength(modelPrompt, "utf8") > MAX_PROMPT_BYTES) {
+        throw textModelCallError(new Error("抖音分析模型输入超过服务端安全上限"), stage);
+      }
+      const request = textModelRequest(config, modelPrompt, 16_384, true);
+      let statistics: TextModelStreamStatistics | undefined;
+      let raw: string | undefined;
+      try {
+        raw = await withTextModelTimeout(async (signal, activity) => textModelConcurrencyGate.run(signal, async () => {
         const response = await fetchImpl(request.endpoint, { method: "POST", redirect: "error", signal,
           headers: request.headers, body: request.body });
         if (!response.ok) { await response.body?.cancel(); throw new Error(`抖音分析模型请求失败（HTTP ${response.status}）`); }
@@ -355,19 +372,36 @@ export function createDouyinAnalysisProvider(config: ChapterTextModelConfig, fet
               onStatistics: (value) => { statistics = value; } })
           : limitedResponseText(response, { protocol: config.protocol ?? "openai-response", signal, onActivity,
               onStatistics: (value) => { statistics = value; } });
-      }), { firstActivityMs: 180_000, idleMs: 180_000, totalMs: 900_000, signal: input.signal });
-      const parsed = JSON.parse(raw) as unknown;
-      const report = parseDouyinAnalysisReport(parsed, input.validEvidenceRefs);
+        }), { firstActivityMs: 180_000, idleMs: 180_000, totalMs: 900_000, signal: input.signal });
+        const parsed = JSON.parse(raw) as unknown;
+        return { parsed, evidence: { ...completedTextModelEvidence(raw, statistics),
+          partialText: redactDiagnosticText(raw, [config.apiKey]) } satisfies TextModelCallEvidence };
+      } catch (error) {
+        const evidence: TextModelCallEvidence = error instanceof TextModelStreamError
+          ? { statistics: error.statistics, partialText: redactDiagnosticText(error.partialText, [config.apiKey]),
+              partialTextTruncated: error.partialTextTruncated }
+          : raw === undefined ? {} : { ...completedTextModelEvidence(raw, statistics),
+              partialText: redactDiagnosticText(raw, [config.apiKey]) };
+        throw textModelCallError(error instanceof SyntaxError ? new Error("抖音分析模型返回了无效严格 JSON", { cause: error }) : error,
+          stage, evidence);
+      }
+    };
+    const parse = (value: unknown) => {
+      const report = parseDouyinAnalysisReport(value, input.validEvidenceRefs);
       validateModelBoundary(report, effectiveInput, metrics);
-      return { report, modelSnapshot: snapshot };
+      return report;
+    };
+    const initial = await callModel(prompt, "douyin-analysis:report:initial");
+    try {
+      return { report: parse(initial.parsed), modelSnapshot: snapshot };
     } catch (error) {
-      const evidence: TextModelCallEvidence = error instanceof TextModelStreamError
-        ? { statistics: error.statistics, partialText: redactDiagnosticText(error.partialText, [config.apiKey]),
-            partialTextTruncated: error.partialTextTruncated }
-        : raw === undefined ? {} : { ...completedTextModelEvidence(raw, statistics),
-            partialText: redactDiagnosticText(raw, [config.apiKey]) };
-      throw textModelCallError(error instanceof SyntaxError ? new Error("抖音分析模型返回了无效严格 JSON", { cause: error }) : error,
-        "douyin-analysis:report", evidence);
+      const correction = await callModel(buildPrompt(payload, error instanceof Error ? error.message : "输出合同无效"),
+        "douyin-analysis:report:correction-1");
+      try {
+        return { report: parse(correction.parsed), modelSnapshot: snapshot };
+      } catch (correctedError) {
+        throw textModelCallError(correctedError, "douyin-analysis:report:correction-1", correction.evidence);
+      }
     }
   };
 }

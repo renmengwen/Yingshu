@@ -85,7 +85,7 @@ test("长 ASR 预算保留首尾、转折并均匀覆盖中段", () => {
   assert.ok(selected.omittedRanges.length > 0);
 });
 
-test("Provider 只调用一次模型并冻结身份，拒绝模型篡改确定性边界", async (t) => {
+test("Provider 对合法响应只调用一次模型，并冻结身份和确定性边界", async (t) => {
   t.mock.method(textModelConcurrencyGate, "run", async (_signal: AbortSignal | undefined, task: () => Promise<unknown>) => task());
   const input = providerInput();
   const metrics = calculateDouyinDeterministicMetrics(input.deterministic);
@@ -94,6 +94,8 @@ test("Provider 只调用一次模型并冻结身份，拒绝模型篡改确定�
     calls += 1;
     const body = JSON.parse(String(init?.body)) as { input: string };
     assert.match(body.input, /comments 为 null/u);
+    assert.match(body.input, /version:'yingshu-douyin-analysis-v1'/u);
+    assert.match(body.input, /confidence:'high'\|'medium'\|'low'/u);
     assert.doesNotMatch(body.input, /爆款分数/u);
     return responseFor(report(metrics));
   }) as typeof fetch;
@@ -109,16 +111,70 @@ test("Provider 只调用一次模型并冻结身份，拒绝模型篡改确定�
   await assert.rejects(() => invalid(input), /确定性指标不一致/u);
 });
 
+test("合同错误只纠正一次并复用冻结输入", async (t) => {
+  t.mock.method(textModelConcurrencyGate, "run", async (_signal: AbortSignal | undefined, task: () => Promise<unknown>) => task());
+  const input = providerInput();
+  const metrics = calculateDouyinDeterministicMetrics(input.deterministic);
+  const prompts: string[] = [];
+  const analyze = createDouyinAnalysisProvider(config, (async (_url: URL | RequestInfo, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { input: string };
+    prompts.push(body.input);
+    return prompts.length === 1
+      ? responseFor({ ...report(metrics), version: { reportVersion: "yingshu-douyin-analysis-v1" } })
+      : responseFor(report(metrics));
+  }) as typeof fetch);
+
+  const result = await analyze(input);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1]!, /上一次完整 JSON 未通过严格合同：抖音分析报告版本无效/u);
+  assert.match(prompts[1]!, /version:'yingshu-douyin-analysis-v1'/u);
+  assert.deepEqual(JSON.parse(prompts[1]!.split("\n").at(-1)!), JSON.parse(prompts[0]!.split("\n").at(-1)!));
+  assert.equal(result.report.version, "yingshu-douyin-analysis-v1");
+});
+
+test("合同纠错仍非法时停止，不发第三次请求", async (t) => {
+  t.mock.method(textModelConcurrencyGate, "run", async (_signal: AbortSignal | undefined, task: () => Promise<unknown>) => task());
+  const input = providerInput();
+  const metrics = calculateDouyinDeterministicMetrics(input.deterministic);
+  let calls = 0;
+  const analyze = createDouyinAnalysisProvider(config, (async () => {
+    calls += 1;
+    return responseFor({ ...report(metrics), version: { reportVersion: "yingshu-douyin-analysis-v1" } });
+  }) as typeof fetch);
+
+  const error = await analyze(input).then(() => null, (caught: unknown) => caught);
+  assert.ok(error instanceof TextModelCallError);
+  assert.equal(error.stage, "douyin-analysis:report:correction-1");
+  assert.match(error.message, /报告版本无效/u);
+  assert.equal(calls, 2);
+});
+
 test("严格 JSON、证据引用、单视频措辞与诊断脱敏", async (t) => {
   t.mock.method(textModelConcurrencyGate, "run", async (_signal: AbortSignal | undefined, task: () => Promise<unknown>) => task());
   const input = providerInput();
   const metrics = calculateDouyinDeterministicMetrics(input.deterministic);
-  const markdown = createDouyinAnalysisProvider(config, (async () => new Response(JSON.stringify({
-    output_text: `\`\`\`json\n${JSON.stringify(report(metrics))}\n\`\`\` secret-key C:\\private\\cookie.json`,
-  }), { headers: { "content-type": "application/json" } })) as typeof fetch);
+  let markdownCalls = 0;
+  const markdown = createDouyinAnalysisProvider(config, (async () => {
+    markdownCalls += 1;
+    return new Response(JSON.stringify({
+      output_text: `\`\`\`json\n${JSON.stringify(report(metrics))}\n\`\`\` secret-key C:\\private\\cookie.json`,
+    }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch);
   const error = await markdown(input).then(() => null, (caught: unknown) => caught);
   assert.ok(error instanceof TextModelCallError);
+  assert.equal(error.stage, "douyin-analysis:report:initial");
   assert.doesNotMatch(error.evidence.partialText ?? "", /secret-key|C:\\private/u);
+  assert.equal(markdownCalls, 1);
+
+  let httpCalls = 0;
+  const httpFailure = createDouyinAnalysisProvider(config, (async () => {
+    httpCalls += 1;
+    return new Response("upstream failed", { status: 503 });
+  }) as typeof fetch);
+  const httpError = await httpFailure(input).then(() => null, (caught: unknown) => caught);
+  assert.ok(httpError instanceof TextModelCallError);
+  assert.equal(httpError.stage, "douyin-analysis:report:initial");
+  assert.equal(httpCalls, 1);
 
   const forged = report(metrics);
   forged.content!.observations[0]!.evidenceRefs = ["asr:missing"];

@@ -164,7 +164,18 @@ export function createDouyinAnalysisJobHandler(database: DatabaseSync, dataRoot:
 
     let detail = checkpointValue<DouyinVideoDetail>(context, "fetch_metadata", inputHash);
     try {
-      if (!detail) { detail = await dependencies.fetchMetadata(dataRoot, snapshot.awemeId); commit(context, "fetch_metadata", inputHash, detail); }
+      if (!detail) {
+        detail = await cancellable(context, (signal) => dependencies.fetchMetadata(dataRoot, snapshot.awemeId, {
+          signal,
+          onLoginRequired: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "need_login", completeness: "unavailable", completedAt: null,
+          }); },
+          onLoginSucceeded: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "running", completeness: "unavailable", completedAt: null,
+          }); },
+        }));
+        commit(context, "fetch_metadata", inputHash, detail);
+      }
     } catch (error) {
       if (error instanceof DouyinSourceError && (error.kind === "need_login" || error.kind === "need_verify")) {
         updateDouyinAnalysisSnapshot(database, { snapshotId: snapshot.id, status: error.kind, completeness: "unavailable", completedAt: Date.now() });
@@ -347,6 +358,9 @@ export function createDouyinAnalysisJobHandler(database: DatabaseSync, dataRoot:
           completeness: "partial", completedAt: Date.now() });
         throw new JobCancelledError();
       }
+      const ids = payload(context.job.payload);
+      updateDouyinAnalysisSnapshot(database, { snapshotId: ids.snapshotId, status: "failed",
+        completeness: "unavailable", completedAt: Date.now() });
       throw error;
     }
   };

@@ -162,3 +162,39 @@ test("元数据登录和验证阻断写入显式快照状态而不伪装平台�
     } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
   }
 });
+
+test("普通元数据错误会把快照同步为 failed 而不残留 running", async () => {
+  const value = await fixture({ extractFrames: true, transcribeAudio: false, analyzeComments: false });
+  value.dependencies.fetchMetadata = async () => { throw new Error("fixture metadata failure"); };
+  const worker = new JobWorker(value.connection.database, { douyin_video_analysis: createDouyinAnalysisJobHandler(value.connection.database,
+    value.dataRoot, value.dependencies) }, { workerId: "metadata-failure", leaseMs: 5_000, heartbeatMs: 100, retryDelayMs: 0 });
+  try {
+    await worker.runOne();
+    const snapshot = getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id);
+    assert.equal(snapshot?.status, "failed");
+    assert.equal(snapshot?.completeness, "unavailable");
+    assert.ok(snapshot?.completedAt);
+    assert.equal(value.calls.download, 0);
+    assert.equal(value.calls.frames, 0);
+    assert.equal(value.calls.analyze, 0);
+  } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
+});
+
+test("元数据等待登录时快照显示 need_login，登录后恢复 running 并继续分析", async () => {
+  const value = await fixture({ extractFrames: false, transcribeAudio: false, analyzeComments: false });
+  const fetchMetadata = value.dependencies.fetchMetadata;
+  value.dependencies.fetchMetadata = async (dataRoot, awemeId, options) => {
+    options?.onLoginRequired?.();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "need_login");
+    options?.onLoginSucceeded?.();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "running");
+    return fetchMetadata(dataRoot, awemeId, options);
+  };
+  const worker = new JobWorker(value.connection.database, { douyin_video_analysis: createDouyinAnalysisJobHandler(value.connection.database,
+    value.dataRoot, value.dependencies) }, { workerId: "metadata-login", leaseMs: 5_000, heartbeatMs: 100 });
+  try {
+    await worker.runOne();
+    assert.equal(getJob(value.connection.database, value.created.job!.id)?.status, "succeeded");
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "succeeded");
+  } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
+});

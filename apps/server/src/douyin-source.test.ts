@@ -104,7 +104,10 @@ function fakeSession(input: { title: string; url: string; body: string; response
     title: async () => input.title, url: () => input.url,
     locator: () => ({ innerText: async () => input.body }),
   } as unknown as Page;
-  return { browser: {} as Browser, context: {} as BrowserContext, page, close: async () => undefined };
+  return { browser: {} as Browser, context: { cookies: async () => [{
+    name: "sessionid", value: "secret", domain: ".douyin.com", path: "/", expires: -1,
+    httpOnly: true, secure: true, sameSite: "Lax",
+  }] } as unknown as BrowserContext, page, close: async () => undefined };
 }
 
 test("可见 Chrome 详情链明确区分登录、验证、平台阻断与解析失败", async () => {
@@ -116,6 +119,7 @@ test("可见 Chrome 详情链明确区分登录、验证、平台阻断与解析
   ] as const;
   for (const [title, url, body, kind] of cases) {
     await assert.rejects(fetchDouyinVideoDetail("unused", id, {
+      detailTimeoutMs: 1,
       sessionFactory: async () => fakeSession({ title, url, body }),
     }), (error: unknown) => error instanceof DouyinSourceError && error.kind === kind);
   }
@@ -124,6 +128,62 @@ test("可见 Chrome 详情链明确区分登录、验证、平台阻断与解析
     response: { aweme_detail: { aweme_id: id, desc: "fixture" } },
   }) });
   assert.equal(detail.title, "fixture");
+});
+
+test("详情链在同一可见 Chrome 等待登录后继续且等待期间不关闭窗口", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-douyin-detail-login-"));
+  let markEntered!: () => void;
+  let releaseLogin!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const release = new Promise<void>((resolve) => { releaseLogin = resolve; });
+  const gotoUrls: string[] = [];
+  let currentUrl = `https://www.douyin.com/video/${id}`;
+  let videoVisits = 0;
+  let closeCalls = 0;
+  let loggedIn = false;
+  let handler: ((response: PlaywrightResponse) => void) | undefined;
+  const session = {
+    browser: {} as Browser,
+    context: { cookies: async () => {
+      if (currentUrl === "https://www.douyin.com/" && !loggedIn) {
+        markEntered(); await release; loggedIn = true;
+      }
+      return loggedIn ? [{ name: "sessionid", value: "secret", domain: ".douyin.com", path: "/", expires: -1,
+        httpOnly: true, secure: true, sameSite: "Lax" }] : [];
+    } } as unknown as BrowserContext,
+    page: {
+      on: (_event: string, next: (response: PlaywrightResponse) => void) => { handler = next; },
+      goto: async (url: string) => {
+        currentUrl = url; gotoUrls.push(url);
+        if (url.includes("/video/") && ++videoVisits === 2) handler?.({
+          url: () => "https://www.douyin.com/aweme/v1/web/aweme/detail/",
+          json: async () => ({ aweme_detail: { aweme_id: id, desc: "登录后的详情" } }),
+        } as PlaywrightResponse);
+      },
+      waitForTimeout: async () => { await new Promise((resolve) => setImmediate(resolve)); },
+      title: async () => loggedIn ? "抖音" : "扫码登录",
+      url: () => currentUrl,
+      locator: () => ({ innerText: async () => loggedIn ? "首页" : "请登录" }),
+    } as unknown as Page,
+    close: async () => { closeCalls += 1; },
+  } satisfies DouyinChromeSession;
+  let loginRequired = 0;
+  let loginSucceeded = 0;
+  try {
+    const pending = fetchDouyinVideoDetail(dataRoot, id, {
+      detailTimeoutMs: 1, loginPollMs: 1, sessionFactory: async () => session,
+      onLoginRequired: () => { loginRequired += 1; }, onLoginSucceeded: () => { loginSucceeded += 1; },
+    });
+    await entered;
+    assert.equal(closeCalls, 0);
+    releaseLogin();
+    const detail = await pending;
+    assert.equal(detail.title, "登录后的详情");
+    assert.deepEqual(gotoUrls, [`https://www.douyin.com/video/${id}`, "https://www.douyin.com/", `https://www.douyin.com/video/${id}`]);
+    assert.equal(loginRequired, 1);
+    assert.equal(loginSucceeded, 1);
+    assert.equal(closeCalls, 1);
+  } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
 
 test("可见 Chrome 登录等待 session Cookie，验证页单独返回 need_verify", async () => {
