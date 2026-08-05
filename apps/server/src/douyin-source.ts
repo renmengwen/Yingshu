@@ -330,6 +330,8 @@ export async function fetchDouyinSessionJson(session: Pick<DouyinChromeSession, 
   }
   if (input.signal?.aborted) throw new DouyinSourceError("timeout", "抖音 API 请求已中断");
 
+  // tsx/esbuild 会给序列化到浏览器的函数注入 __name；浏览器上下文需提供同名辅助函数。
+  await session.page.evaluate("globalThis.__name ??= (value) => value");
   const requestId = `yingshu_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const abort = () => { void session.page.evaluate((id) => {
     const state = globalThis as unknown as { __yingshuDouyinRequests?: Map<string, AbortController> };
@@ -337,7 +339,7 @@ export async function fetchDouyinSessionJson(session: Pick<DouyinChromeSession, 
   }, requestId).catch(() => undefined); };
   input.signal?.addEventListener("abort", abort, { once: true });
   try {
-    const result = await session.page.evaluate(async (request) => {
+    const result = await session.page.evaluate(async function douyinRequestInPage(request) {
       const state = globalThis as unknown as {
         bdms?: { init?: { _v?: Array<{ p?: Record<number, unknown> }> } };
         __yingshuDouyinRequests?: Map<string, AbortController>;
@@ -449,30 +451,40 @@ function pageState(title: string, url: string, body: string): DouyinSourceFailur
   return null;
 }
 
-function hasDouyinLogin(cookies: Cookie[]) {
+export function hasDouyinLogin(cookies: Cookie[]) {
   return cookies.some((cookie) => cookie.name === "sessionid" || cookie.name === "LOGIN_STATUS");
 }
 
-async function waitForDouyinLoginInSession(dataRoot: string, session: DouyinChromeSession, options: {
+export async function waitForDouyinLoginInSession(dataRoot: string, session: DouyinChromeSession, options: {
   timeoutMs?: number;
   pollMs?: number;
   signal?: AbortSignal;
+  onVerificationRequired?: () => void;
 }) {
-  await session.page.goto("https://www.douyin.com/", { waitUntil: "domcontentloaded", timeout: 20_000 });
+  const initialState = pageState(await session.page.title(), session.page.url(),
+    await session.page.locator("body").innerText().catch(() => ""));
+  if (initialState !== "need_verify") {
+    await session.page.goto("https://www.douyin.com/", { waitUntil: "domcontentloaded", timeout: 20_000 });
+  }
   const deadline = Date.now() + (options.timeoutMs ?? 5 * 60_000);
+  let verificationReported = false;
   while (Date.now() < deadline) {
     if (options.signal?.aborted) throw new DouyinSourceError("timeout", "等待抖音登录已中断");
+    const state = pageState(await session.page.title(), session.page.url(),
+      await session.page.locator("body").innerText().catch(() => ""));
+    if (state === "need_verify" && !verificationReported) {
+      verificationReported = true;
+      options.onVerificationRequired?.();
+    }
+    if (state === "platform_blocked") throw new DouyinSourceError("platform_blocked", "抖音平台阻止了登录页面");
     const cookies = await session.context.cookies("https://www.douyin.com");
-    if (hasDouyinLogin(cookies)) {
+    if (state !== "need_verify" && hasDouyinLogin(cookies)) {
       await saveDouyinCookies(dataRoot, cookies);
       return;
     }
-    const state = pageState(await session.page.title(), session.page.url(),
-      await session.page.locator("body").innerText().catch(() => ""));
-    if (state === "need_verify") throw new DouyinSourceError("need_verify", "抖音需要完成验证后才能继续");
-    if (state === "platform_blocked") throw new DouyinSourceError("platform_blocked", "抖音平台阻止了登录页面");
     await session.page.waitForTimeout(options.pollMs ?? 500);
   }
+  if (verificationReported) throw new DouyinSourceError("need_verify", "等待抖音安全验证超时");
   throw new DouyinSourceError("timeout", "等待抖音登录超时");
 }
 
@@ -481,6 +493,7 @@ export async function waitForVisibleDouyinLogin(dataRoot: string, options: {
   timeoutMs?: number;
   pollMs?: number;
   signal?: AbortSignal;
+  onVerificationRequired?: () => void;
   sessionFactory?: typeof openVisibleDouyinChrome;
 } = {}) {
   const session = await (options.sessionFactory ?? openVisibleDouyinChrome)(dataRoot, { chromePath: options.chromePath });
@@ -500,6 +513,7 @@ export async function fetchDouyinVideoDetail(dataRoot: string, awemeId: string, 
   detailTimeoutMs?: number;
   signal?: AbortSignal;
   onLoginRequired?: () => void;
+  onVerificationRequired?: () => void;
   onLoginSucceeded?: () => void;
   sessionFactory?: typeof openVisibleDouyinChrome;
 } = {}): Promise<DouyinVideoDetail> {
@@ -531,10 +545,11 @@ export async function fetchDouyinVideoDetail(dataRoot: string, awemeId: string, 
       if (captured) return parseDouyinVideoDetail(captured);
       const state = pageState(await session.page.title(), session.page.url(), await session.page.locator("body").innerText().catch(() => ""));
       const loggedIn = hasDouyinLogin(await session.context.cookies("https://www.douyin.com"));
-      if (attempt === 0 && (state === "need_login" || !loggedIn)) {
-        options.onLoginRequired?.();
+      if (attempt === 0 && (state === "need_login" || state === "need_verify" || !loggedIn)) {
+        if (state !== "need_verify") options.onLoginRequired?.();
         await waitForDouyinLoginInSession(dataRoot, session, {
           timeoutMs: options.loginTimeoutMs, pollMs: options.loginPollMs, signal: options.signal,
+          onVerificationRequired: options.onVerificationRequired,
         });
         options.onLoginSucceeded?.();
         continue;

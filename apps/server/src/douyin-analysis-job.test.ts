@@ -126,6 +126,31 @@ test("失败重试复用已校验 checkpoint，视频 Hash 变化时只重做受
   } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
 });
 
+test("新 Job 重试复用同一快照已校验视频，不依赖已失效下载地址", async () => {
+  const value = await fixture({ extractFrames: true, transcribeAudio: false, analyzeComments: true });
+  try {
+    await value.worker.runOne();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "partial");
+    const fetchMetadata = value.dependencies.fetchMetadata;
+    value.dependencies.fetchMetadata = async (...args) => ({ ...await fetchMetadata(...args), videoDownloadUrl: null });
+    const retried = enqueueDouyinAnalysis(value.connection.database, {
+      projectId: value.project.id, videoId: value.video.id, awemeId: "12345",
+      sourceUrl: "https://www.douyin.com/video/12345", config: {
+        sourceText: "https://www.douyin.com/video/12345", frameCount: 6,
+        extractFrames: true, transcribeAudio: false, analyzeComments: true,
+      },
+    });
+    assert.ok(retried.job);
+    const worker = new JobWorker(value.connection.database, { douyin_video_analysis: createDouyinAnalysisJobHandler(value.connection.database,
+      value.dataRoot, value.dependencies) }, { workerId: "cross-job-media-reuse", leaseMs: 5_000, heartbeatMs: 100 });
+    await worker.runOne();
+    const snapshot = getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id);
+    assert.equal(value.calls.download, 1);
+    assert.equal(snapshot?.report?.evidence.videoStatus, "succeeded");
+    assert.equal(snapshot?.report?.evidence.succeededFrames, 6);
+  } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
+});
+
 function connectionReset(database: ReturnType<typeof openDatabase>["database"], jobId: string) {
   database.prepare("UPDATE jobs SET status='queued',progress=0,attempts=0,finished_at=NULL,lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(jobId);
   database.prepare("UPDATE video_douyin_analysis_snapshots SET status='queued',completed_at=NULL WHERE id=(SELECT snapshot_id FROM video_douyin_analysis_jobs WHERE job_id=?)").run(jobId);
@@ -196,5 +221,49 @@ test("元数据等待登录时快照显示 need_login，登录后恢复 running 
     await worker.runOne();
     assert.equal(getJob(value.connection.database, value.created.job!.id)?.status, "succeeded");
     assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "succeeded");
+  } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
+});
+
+test("评论等待登录时快照显示 need_login，登录后恢复 running 并继续分析", async () => {
+  const value = await fixture({ extractFrames: false, transcribeAudio: false, analyzeComments: true });
+  const fetchComments = value.dependencies.fetchComments;
+  value.dependencies.fetchComments = async (dataRoot, awemeId, options) => {
+    options?.onLoginRequired?.();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "need_login");
+    options?.onVerificationRequired?.();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "need_verify");
+    options?.onLoginSucceeded?.();
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "running");
+    return fetchComments(dataRoot, awemeId, options);
+  };
+  const worker = new JobWorker(value.connection.database, { douyin_video_analysis: createDouyinAnalysisJobHandler(value.connection.database,
+    value.dataRoot, value.dependencies) }, { workerId: "comments-login", leaseMs: 5_000, heartbeatMs: 100 });
+  try {
+    await worker.runOne();
+    assert.equal(getJob(value.connection.database, value.created.job!.id)?.status, "succeeded");
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "partial");
+  } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
+});
+
+test("评论等待登录期间取消会关闭等待并保留 cancelled 快照", async () => {
+  const value = await fixture({ extractFrames: false, transcribeAudio: false, analyzeComments: true });
+  let started!: () => void;
+  const active = new Promise<void>((resolve) => { started = resolve; });
+  value.dependencies.fetchComments = async (_dataRoot, _awemeId, options) => {
+    options?.onLoginRequired?.();
+    started();
+    await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener("abort",
+      () => reject(new DOMException("取消", "AbortError")), { once: true }));
+    throw new Error("unreachable");
+  };
+  const worker = new JobWorker(value.connection.database, { douyin_video_analysis: createDouyinAnalysisJobHandler(value.connection.database,
+    value.dataRoot, value.dependencies) }, { workerId: "comments-login-cancel", leaseMs: 5_000, heartbeatMs: 100 });
+  try {
+    const running = worker.runOne();
+    await active;
+    requestJobCancellation(value.connection.database, value.created.job!.id);
+    await running;
+    assert.equal(getJob(value.connection.database, value.created.job!.id)?.status, "cancelled");
+    assert.equal(getCurrentDouyinAnalysisSnapshot(value.connection.database, value.project.id, value.video.id)?.status, "cancelled");
   } finally { value.connection.close(); await rm(value.dataRoot, { recursive: true, force: true }); }
 });

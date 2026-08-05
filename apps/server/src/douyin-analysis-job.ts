@@ -170,6 +170,9 @@ export function createDouyinAnalysisJobHandler(database: DatabaseSync, dataRoot:
           onLoginRequired: () => { updateDouyinAnalysisSnapshot(database, {
             snapshotId: snapshot.id, status: "need_login", completeness: "unavailable", completedAt: null,
           }); },
+          onVerificationRequired: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "need_verify", completeness: "unavailable", completedAt: null,
+          }); },
           onLoginSucceeded: () => { updateDouyinAnalysisSnapshot(database, {
             snapshotId: snapshot.id, status: "running", completeness: "unavailable", completedAt: null,
           }); },
@@ -194,6 +197,11 @@ export function createDouyinAnalysisJobHandler(database: DatabaseSync, dataRoot:
       const videoPath = `${root}/video.mp4`;
       video = checkpointValue<MediaFileIdentity>(context, "download_video", inputHash) ?? null;
       if (video && !await verifyDouyinMediaFile(dataRoot, video.relativePath, { mime: "video/mp4", bytes: video.bytes, sha256: video.sha256 }).then(() => true, () => false)) video = null;
+      if (!video && !detail.videoDownloadUrl) {
+        // 同一冻结快照重试会创建新 Job；重新校验已落盘视频，避免把有效证据误判为未下载。
+        video = await verifyDouyinMediaFile(dataRoot, videoPath, { mime: "video/mp4" }).catch(() => null);
+        if (video) commit(context, "download_video", inputHash, video);
+      }
       if (!video) {
         try {
           if (!detail.videoDownloadUrl) throw new Error("抖音详情没有可验证的视频下载地址");
@@ -284,8 +292,19 @@ export function createDouyinAnalysisJobHandler(database: DatabaseSync, dataRoot:
     if (snapshot.config.analyzeComments) {
       comments = checkpointValue<DouyinCommentsResult>(context, "fetch_comments", inputHash) ?? null;
       if (!comments) {
-        try { comments = await dependencies.fetchComments(dataRoot, snapshot.awemeId); }
-        catch (error) { comments = { status: "failed", failureKind: "platform_blocked", comments: [], fetchedAt: Date.now(),
+        try { comments = await cancellable(context, (signal) => dependencies.fetchComments(dataRoot, snapshot.awemeId, {
+          signal,
+          onLoginRequired: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "need_login", completeness: "unavailable", completedAt: null,
+          }); },
+          onVerificationRequired: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "need_verify", completeness: "unavailable", completedAt: null,
+          }); },
+          onLoginSucceeded: () => { updateDouyinAnalysisSnapshot(database, {
+            snapshotId: snapshot.id, status: "running", completeness: "unavailable", completedAt: null,
+          }); },
+        })); }
+        catch (error) { if (error instanceof JobCancelledError) throw error; comments = { status: "failed", failureKind: "platform_blocked", comments: [], fetchedAt: Date.now(),
           pagesFetched: 0, truncated: false, interpretationOnly: true, diagnostic: { cache: "miss",
             cacheWriteError: error instanceof Error ? error.message.slice(0, 500) : "评论获取失败" } }; }
         commit(context, "fetch_comments", inputHash, comments);

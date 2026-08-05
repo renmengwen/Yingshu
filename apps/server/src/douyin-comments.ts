@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  DouyinSourceError, fetchDouyinSessionJson, openVisibleDouyinChrome, redactDouyinDiagnostic,
+  DouyinSourceError, fetchDouyinSessionJson, hasDouyinLogin, openVisibleDouyinChrome, redactDouyinDiagnostic,
+  waitForDouyinLoginInSession,
   type DouyinChromeSession,
 } from "./douyin-source.js";
 
@@ -170,6 +171,12 @@ export async function fetchDouyinComments(dataRoot: string, awemeId: string, opt
   now?: () => number;
   sessionFactory?: typeof openVisibleDouyinChrome;
   requestJson?: RequestJson;
+  loginTimeoutMs?: number;
+  loginPollMs?: number;
+  signal?: AbortSignal;
+  onLoginRequired?: () => void;
+  onVerificationRequired?: () => void;
+  onLoginSucceeded?: () => void;
 } = {}): Promise<DouyinCommentsResult> {
   if (!AWEME_ID.test(awemeId)) throw new DouyinSourceError("parse_failed", "抖音视频 ID 无效");
   const now = options.now?.() ?? Date.now();
@@ -181,17 +188,37 @@ export async function fetchDouyinComments(dataRoot: string, awemeId: string, opt
   let result: DouyinCommentsResult | undefined;
   try {
     session = await (options.sessionFactory ?? openVisibleDouyinChrome)(dataRoot);
-    await session.page.goto(`https://www.douyin.com/video/${awemeId}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
-    const visibleState = pageFailure(await session.page.title(), session.page.url(),
-      await session.page.locator("body").innerText().catch(() => ""));
-    if (visibleState) {
+    if (!hasDouyinLogin(await session.context.cookies("https://www.douyin.com"))) {
+      options.onLoginRequired?.();
+      await waitForDouyinLoginInSession(dataRoot, session, {
+        timeoutMs: options.loginTimeoutMs, pollMs: options.loginPollMs, signal: options.signal,
+        onVerificationRequired: options.onVerificationRequired,
+      });
+      options.onLoginSucceeded?.();
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await session.page.goto(`https://www.douyin.com/video/${awemeId}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      // 抖音可能在 DOM 就绪后才异步切换到验证码中间页，需等待页面状态稳定后再判断。
+      await session.page.waitForTimeout(1_000);
+      const visibleState = pageFailure(await session.page.title(), session.page.url(),
+        await session.page.locator("body").innerText().catch(() => ""));
+      if (!visibleState) break;
+      if (attempt === 0) {
+        if (visibleState === "need_login") options.onLoginRequired?.();
+        await waitForDouyinLoginInSession(dataRoot, session, {
+          timeoutMs: options.loginTimeoutMs, pollMs: options.loginPollMs, signal: options.signal,
+          onVerificationRequired: options.onVerificationRequired,
+        });
+        options.onLoginSucceeded?.();
+        continue;
+      }
       result = { status: visibleState, comments: [], fetchedAt: now, pagesFetched: 0,
         truncated: false, interpretationOnly: true, diagnostic };
       return result;
     }
 
     const requestJson = options.requestJson ?? ((activeSession, path, params) => fetchDouyinSessionJson(activeSession, {
-      uri: path, params, referer: `https://www.douyin.com/video/${awemeId}`,
+      uri: path, params, referer: `https://www.douyin.com/video/${awemeId}`, signal: options.signal,
     }));
     const comments: DouyinComment[] = [];
     let cursor = 0;

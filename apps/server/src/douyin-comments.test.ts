@@ -13,17 +13,23 @@ import type { DouyinChromeSession } from "./douyin-source.js";
 
 const awemeId = "7640385127511641382";
 
-function fakeSession(body = "正常视频页面"): DouyinChromeSession {
+function fakeSession(body = "正常视频页面", state: { loggedIn?: boolean; onWait?: () => void; onClose?: () => void } = {}): DouyinChromeSession {
+  const startedLoggedIn = state.loggedIn ?? true;
+  let loggedIn = startedLoggedIn;
   return {
     browser: {} as Browser,
-    context: {} as BrowserContext,
+    context: {
+      cookies: async () => loggedIn ? [{ name: "sessionid", value: "fixture", domain: ".douyin.com", path: "/",
+        expires: -1, httpOnly: true, secure: true, sameSite: "Lax" as const }] : [],
+    } as unknown as BrowserContext,
     page: {
       goto: async () => undefined,
       title: async () => "视频",
       url: () => `https://www.douyin.com/video/${awemeId}`,
-      locator: () => ({ innerText: async () => body }),
+      locator: () => ({ innerText: async () => !startedLoggedIn && loggedIn ? "正常视频页面" : body }),
+      waitForTimeout: async () => { state.onWait?.(); loggedIn = true; },
     } as unknown as Page,
-    close: async () => undefined,
+    close: async () => { state.onClose?.(); },
   };
 }
 
@@ -91,7 +97,9 @@ test("登录、验证、空结果和首次失败状态彼此独立", async () =>
   for (const [body, status] of cases) {
     const root = await mkdtemp(join(tmpdir(), "yingshu-douyin-comments-state-"));
     try {
-      const result = await fetchDouyinComments(root, awemeId, { sessionFactory: async () => fakeSession(body) });
+      const result = await fetchDouyinComments(root, awemeId, {
+        loginTimeoutMs: 1, loginPollMs: 1, sessionFactory: async () => fakeSession(body),
+      });
       assert.equal(result.status, status);
     } finally { await rm(root, { recursive: true, force: true }); }
   }
@@ -106,6 +114,27 @@ test("登录、验证、空结果和首次失败状态彼此独立", async () =>
     });
     assert.equal(failed.status, "failed");
     assert.equal(failed.failureKind, "platform_blocked");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("评论采集保持可见 Chrome 等待验证和登录，登录后继续请求并最后关闭", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yingshu-douyin-comments-login-"));
+  const events: string[] = [];
+  try {
+    const result = await fetchDouyinComments(root, awemeId, {
+      loginPollMs: 1,
+      sessionFactory: async () => fakeSession("完成验证码", {
+        loggedIn: false,
+        onWait: () => events.push("wait"),
+        onClose: () => events.push("close"),
+      }),
+      onLoginRequired: () => events.push("need_login"),
+      onVerificationRequired: () => events.push("need_verify"),
+      onLoginSucceeded: () => events.push("running"),
+      requestJson: async () => { events.push("request"); return { has_more: false, comments: [] }; },
+    });
+    assert.equal(result.status, "empty");
+    assert.deepEqual(events, ["need_login", "need_verify", "wait", "running", "wait", "request", "close"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

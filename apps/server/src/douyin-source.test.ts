@@ -119,7 +119,7 @@ test("可见 Chrome 详情链明确区分登录、验证、平台阻断与解析
   ] as const;
   for (const [title, url, body, kind] of cases) {
     await assert.rejects(fetchDouyinVideoDetail("unused", id, {
-      detailTimeoutMs: 1,
+      detailTimeoutMs: 1, loginTimeoutMs: 1, loginPollMs: 1,
       sessionFactory: async () => fakeSession({ title, url, body }),
     }), (error: unknown) => error instanceof DouyinSourceError && error.kind === kind);
   }
@@ -186,11 +186,13 @@ test("详情链在同一可见 Chrome 等待登录后继续且等待期间不关
   } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
 
-test("可见 Chrome 登录等待 session Cookie，验证页单独返回 need_verify", async () => {
+test("可见 Chrome 在登录和验证页面都保持等待 session Cookie", async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-douyin-login-"));
   let cookieChecks = 0;
   const createSession = (title: string, body: string) => {
     const session = fakeSession({ title, url: "https://www.douyin.com/", body });
+    session.page.title = async () => cookieChecks >= 2 ? "抖音" : title;
+    session.page.locator = () => ({ innerText: async () => cookieChecks >= 2 ? "首页" : body }) as ReturnType<Page["locator"]>;
     session.context = {
       cookies: async () => ++cookieChecks < 2 ? [] : [{
         name: "sessionid", value: "secret", domain: ".douyin.com", path: "/", expires: -1,
@@ -204,9 +206,12 @@ test("可见 Chrome 登录等待 session Cookie，验证页单独返回 need_ver
       pollMs: 1, sessionFactory: async () => createSession("扫码登录", "请登录"),
     }), { status: "succeeded" });
     cookieChecks = 0;
-    await assert.rejects(waitForVisibleDouyinLogin(dataRoot, {
+    let verificationRequired = 0;
+    assert.deepEqual(await waitForVisibleDouyinLogin(dataRoot, {
       pollMs: 1, sessionFactory: async () => createSession("安全验证", "完成验证码"),
-    }), (error: unknown) => error instanceof DouyinSourceError && error.kind === "need_verify");
+      onVerificationRequired: () => { verificationRequired += 1; },
+    }), { status: "succeeded" });
+    assert.equal(verificationRequired, 1);
   } finally { await rm(dataRoot, { recursive: true, force: true }); }
 });
 
