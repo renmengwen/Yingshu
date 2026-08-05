@@ -1545,6 +1545,10 @@ const MIGRATION_25 = `
 `;
 
 const MIGRATION_26 = `
+  CREATE TABLE video_douyin_delete_context (
+    video_id TEXT PRIMARY KEY
+  ) STRICT;
+
   CREATE TABLE video_douyin_analysis_snapshots (
     id TEXT PRIMARY KEY,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -1616,13 +1620,17 @@ const MIGRATION_26 = `
     OR OLD.model_snapshot_json IS NOT NEW.model_snapshot_json OR OLD.prompt_version IS NOT NEW.prompt_version
     OR OLD.created_at IS NOT NEW.created_at OR OLD.invalidated_at IS NOT NULL
   BEGIN SELECT RAISE(ABORT, 'douyin analysis snapshot frozen identity is immutable'); END;
+  CREATE TRIGGER video_douyin_video_delete_begin BEFORE DELETE ON videos
+  BEGIN INSERT OR IGNORE INTO video_douyin_delete_context (video_id) VALUES (OLD.id); END;
+  CREATE TRIGGER video_douyin_video_delete_end AFTER DELETE ON videos
+  BEGIN DELETE FROM video_douyin_delete_context WHERE video_id = OLD.id; END;
   CREATE TRIGGER video_douyin_snapshots_no_delete BEFORE DELETE ON video_douyin_analysis_snapshots
-  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  WHEN NOT EXISTS (SELECT 1 FROM video_douyin_delete_context WHERE video_id = OLD.video_id)
   BEGIN SELECT RAISE(ABORT, 'douyin analysis snapshots are append-only'); END;
   CREATE TRIGGER video_douyin_events_immutable BEFORE UPDATE ON video_douyin_analysis_selection_events
   BEGIN SELECT RAISE(ABORT, 'douyin analysis selection events are append-only'); END;
   CREATE TRIGGER video_douyin_events_no_delete BEFORE DELETE ON video_douyin_analysis_selection_events
-  WHEN EXISTS (SELECT 1 FROM videos WHERE id = OLD.video_id)
+  WHEN NOT EXISTS (SELECT 1 FROM video_douyin_delete_context WHERE video_id = OLD.video_id)
   BEGIN SELECT RAISE(ABORT, 'douyin analysis selection events are append-only'); END;
 `;
 
@@ -1681,6 +1689,25 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
     }
 
     for (let index = applied.length; index < MIGRATIONS.length; index += 1) {
+      // 旧项目包测试会从当前库裁剪回历史版本；仅允许清理其中空且完整的未登记 v26 表，绝不丢弃真实分析数据。
+      const douyinTables = [
+        "video_douyin_delete_context", "video_douyin_analysis_snapshots", "video_douyin_analysis_jobs",
+        "video_douyin_analysis_selections", "video_douyin_analysis_selection_events",
+      ] as const;
+      const staleDouyinTables = index === 25 ? database.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${douyinTables.map(() => "?").join(",")}) ORDER BY name`,
+      ).all(...douyinTables) as Array<{ name: string }> : [];
+      if (staleDouyinTables.length) {
+        if (staleDouyinTables.length !== douyinTables.length || douyinTables.some((table) =>
+          !staleDouyinTables.some((row) => row.name === table))) {
+          throw new Error("历史数据库包含不完整的抖音分析 v26 表");
+        }
+        for (const table of douyinTables) {
+          if ((database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count !== 0) {
+            throw new Error("历史数据库包含未登记迁移版本的抖音分析数据");
+          }
+        }
+      }
       const rebuildsReferencedTable = index === 12 || index === 22 || index === 24;
       const videoDeleteTriggers = index === 24 ? database.prepare(
         "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql LIKE '%FROM videos%' ORDER BY name",
@@ -1688,6 +1715,15 @@ export function openDatabase(dataRoot?: string): YingshuDatabase {
       if (rebuildsReferencedTable) database.exec("PRAGMA foreign_keys = OFF");
       database.exec("BEGIN IMMEDIATE");
       try {
+        if (staleDouyinTables.length) database.exec(`
+          DROP TRIGGER IF EXISTS video_douyin_video_delete_begin;
+          DROP TRIGGER IF EXISTS video_douyin_video_delete_end;
+          DROP TABLE video_douyin_analysis_selection_events;
+          DROP TABLE video_douyin_analysis_selections;
+          DROP TABLE video_douyin_analysis_jobs;
+          DROP TABLE video_douyin_analysis_snapshots;
+          DROP TABLE video_douyin_delete_context;
+        `);
         for (const trigger of videoDeleteTriggers) {
           database.exec(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
         }

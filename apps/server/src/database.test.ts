@@ -7,12 +7,17 @@ import test from "node:test";
 
 import { openDatabase } from "./database.js";
 
-function dropVideoPlanTables(database: DatabaseSync) {
-  database.exec(`
+function dropVideoPlanTables(database: DatabaseSync, keepDouyinTables = false) {
+  if (!keepDouyinTables) database.exec(`
+    DROP TRIGGER video_douyin_video_delete_begin;
+    DROP TRIGGER video_douyin_video_delete_end;
     DROP TABLE video_douyin_analysis_selection_events;
     DROP TABLE video_douyin_analysis_selections;
     DROP TABLE video_douyin_analysis_jobs;
     DROP TABLE video_douyin_analysis_snapshots;
+    DROP TABLE video_douyin_delete_context;
+  `);
+  database.exec(`
     DROP TABLE video_final_videos;
     DROP TABLE video_render_chunks;
     DROP TABLE video_render_runs;
@@ -36,6 +41,53 @@ function dropVideoPlanTables(database: DatabaseSync) {
     DROP TABLE video_plan_snapshots;
   `);
 }
+
+test("历史项目包遗留空 v26 表时可从 v19 安全重建视频表与删除保护触发器", async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-database-v26-historical-package-"));
+  try {
+    const current = openDatabase(dataRoot);
+    dropVideoPlanTables(current.database, true);
+    current.database.exec(`
+      DROP TABLE global_prompt_settings;
+      DROP TABLE videos;
+      DROP TABLE projects;
+      DELETE FROM schema_migrations WHERE version >= 20;
+    `);
+    current.close();
+
+    const upgraded = openDatabase(dataRoot);
+    assert.equal(upgraded.database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 26);
+    assert.equal(upgraded.database.prepare("PRAGMA foreign_key_check").all().length, 0);
+    const triggers = upgraded.database.prepare(
+      `SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'video_douyin_%delete%'
+       ORDER BY name`,
+    ).all() as Array<{ name: string }>;
+    assert.deepEqual(triggers.map((row) => row.name), [
+      "video_douyin_events_no_delete", "video_douyin_snapshots_no_delete",
+      "video_douyin_video_delete_begin", "video_douyin_video_delete_end",
+    ]);
+    upgraded.database.exec(`
+      INSERT INTO projects (id,name,created_at,updated_at) VALUES ('historical_project','历史项目',1,1);
+      INSERT INTO videos (id,project_id,title,status,created_at,updated_at)
+        VALUES ('historical_video','historical_project','历史视频','draft',1,1);
+      INSERT INTO video_douyin_analysis_snapshots
+        (id,video_id,aweme_id,source_url,source_text,config_json,config_hash,status,completeness,created_at)
+        VALUES ('historical_snapshot','historical_video','12345','https://www.douyin.com/video/12345',
+          'https://www.douyin.com/video/12345','{}',
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','queued','unavailable',1);
+    `);
+    assert.throws(
+      () => upgraded.database.prepare("DELETE FROM video_douyin_analysis_snapshots WHERE id='historical_snapshot'").run(),
+      /append-only/u,
+    );
+    upgraded.database.prepare("DELETE FROM videos WHERE id='historical_video'").run();
+    assert.equal(upgraded.database.prepare("SELECT COUNT(*) AS count FROM video_douyin_analysis_snapshots").get()?.count, 0);
+    assert.equal(upgraded.database.prepare("SELECT COUNT(*) AS count FROM video_douyin_delete_context").get()?.count, 0);
+    upgraded.close();
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
 
 function downgradeCurrentDatabaseFromV18(database: DatabaseSync) {
   dropVideoPlanTables(database);
