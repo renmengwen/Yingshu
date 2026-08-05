@@ -1,19 +1,18 @@
 import { Button } from "../components/ui/button";
-import { Checkbox } from "../components/ui/checkbox";
 import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "../components/ui/field";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Textarea } from "../components/ui/textarea";
+import { EyeIcon, SaveIcon } from "lucide-react";
 import type { VideoInputDraft } from "./types";
 import { useVideoInput } from "./use-video-input";
 import { videoPlanLaunchBlockReason, VideoPlanLauncher } from "./VideoPlanLauncher";
 import {
-  applyVisualStylePreset, promptInstructionsStatus, selectedVisualStylePreset,
-  VideoPromptInstructionsDialog, VISUAL_STYLE_PRESETS,
-} from "./VideoPromptInstructionsDialog";
+  hiddenRadioClass, segmentedOptionClass, VideoProductionSettingsDialog,
+} from "./VideoProductionSettingsDialog";
+import { promptInstructionsStatus, selectedVisualStylePreset, VISUAL_STYLE_PRESETS } from "./visual-style-presets";
 import type { useVideoPlan } from "./use-video-plan";
 
-const segmentClass = "focus-ring-proxy flex min-h-11 w-full cursor-pointer items-center justify-center rounded-md border border-border px-3 text-center text-sm font-medium has-data-[state=checked]:border-primary has-data-[state=checked]:bg-[var(--surface-selected)] has-data-[state=checked]:text-[var(--accent-strong)]";
-const hiddenRadioClass = "sr-only absolute! size-px!";
+const segmentClass = segmentedOptionClass;
 
 export function VideoInputStage({ projectId, videoId, planState, onPlanStarted }: { projectId: string; videoId: string; planState: ReturnType<typeof useVideoPlan>; onPlanStarted: () => void }) {
   const state = useVideoInput(projectId, videoId);
@@ -27,6 +26,7 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
     ? videoPlanLaunchBlockReason(state.draft, state.dirty, state.busy || planState.busy, planState.modelAvailable) : null;
   const visualInstructions = state.draft?.visualInstructions ?? "";
   const visualStylePreset = selectedVisualStylePreset(visualInstructions);
+  const visualStyleLabel = VISUAL_STYLE_PRESETS.find((preset) => preset.id === visualStylePreset)?.label ?? (visualInstructions.trim() ? "自定义画风" : "未设画风");
 
   return <section className="min-w-0" aria-labelledby="input-stage-heading">
     {state.draft ? <form id="video-input-form" aria-describedby="video-input-status" onSubmit={(event) => { event.preventDefault(); void state.save(); }}>
@@ -38,15 +38,15 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
           <p id="video-input-status" className={`mt-2 text-sm ${state.error ? "font-medium text-[var(--danger)]" : "text-[var(--fg-secondary)]"}`} role={state.error ? "alert" : "status"} aria-live={state.error ? undefined : "polite"}>{state.dirty ? `有未保存修改。${state.status}` : state.status}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" variant="outline" disabled={state.busy || !state.dirty}>{state.busy ? "正在保存草稿…" : "保存草稿"}</Button>
+          <Button type="submit" variant="outline" disabled={state.busy || !state.dirty}><SaveIcon aria-hidden="true" />{state.busy ? "正在保存草稿…" : "保存草稿"}</Button>
           {launchAvailable && planState ? <VideoPlanLauncher input={state.draft} dirty={state.dirty} busy={state.busy || planState.busy} modelLabel={planState.modelLabel} modelAvailable={planState.modelAvailable} onStart={() => { void planState.start(); onPlanStarted?.(); }} /> : null}
-          {planState && !launchAvailable && (planState.plan || planState.job) && onPlanStarted ? <Button type="button" onClick={onPlanStarted}>{planState.plan ? "查看当前方案" : "查看生成进度"}</Button> : null}
+          {planState && !launchAvailable && (planState.plan || planState.job) && onPlanStarted ? <Button type="button" onClick={onPlanStarted}><EyeIcon aria-hidden="true" />{planState.plan ? "查看当前方案" : "查看生成进度"}</Button> : null}
         </div>
         {launchBlockReason ? <p className="text-sm text-[var(--fg-secondary)] md:basis-full md:text-right">{launchBlockReason}</p> : null}
       </header>
 
-      <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <section className="grid min-w-0 content-start gap-7 p-5 md:p-7" aria-labelledby="creative-input-heading">
+      <div>
+        <section className="grid min-w-0 gap-7 p-5 md:p-7" aria-labelledby="creative-input-heading">
           <div><h3 id="creative-input-heading" className="text-base font-semibold">创作内容</h3><p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">选择创作起点，并提供生成旁白所需的核心内容。</p></div>
           <FieldSet disabled={state.busy}>
             <FieldLegend className="mb-0" variant="label">输入方式</FieldLegend>
@@ -81,60 +81,17 @@ export function VideoInputContent({ state, planState, onPlanStarted }: { state: 
           </div>
         </section>
 
-        <aside className="grid content-start gap-7 border-t border-[var(--border-subtle)] bg-[var(--bg-subtle)] p-5 md:p-7 lg:border-l lg:border-t-0" aria-labelledby="production-settings-heading">
-          <div><h3 id="production-settings-heading" className="text-base font-semibold">制作参数</h3><p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">这些设置会随本次方案一起冻结。</p></div>
-          <FieldSet disabled={state.busy}>
-            <FieldLegend className="mb-0" variant="label">目标时长</FieldLegend>
-            <FieldDescription>时长会影响旁白篇幅和预计画面数量。</FieldDescription>
-            <RadioGroup className="grid grid-cols-2 gap-2" name="duration" value={String(state.draft.targetDurationSeconds)} onValueChange={(value) => update("targetDurationSeconds", Number(value))}>
-              {([[60, '1 分钟'], [180, '3 分钟'], [300, '5 分钟'], [600, '10 分钟']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={String(value)} /><span>{label}</span></FieldLabel>)}
-            </RadioGroup>
-          </FieldSet>
-          <FieldSet disabled={state.busy}>
-            <FieldLegend className="mb-0" variant="label">画面节奏</FieldLegend>
-            <RadioGroup className="grid grid-cols-3 gap-2" name="visual-density" value={state.draft.visualDensity} onValueChange={(value) => update("visualDensity", value as VideoInputDraft["visualDensity"])}>
-              {([['relaxed', '舒缓'], ['standard', '标准'], ['compact', '紧凑']] as const).map(([value, label]) => <FieldLabel className={segmentClass} key={value}><RadioGroupItem className={hiddenRadioClass} value={value} /><span>{label}</span></FieldLabel>)}
-            </RadioGroup>
-            <FieldDescription>{state.draft.visualDensity === "relaxed" ? "单张画面停留更久。" : state.draft.visualDensity === "compact" ? "画面切换更频繁。" : "适合大多数讲解视频。"}</FieldDescription>
-          </FieldSet>
-          <FieldSet disabled={state.busy}>
-            <FieldLegend className="mb-0" variant="label">生图画风</FieldLegend>
-            <FieldDescription id="video-visual-style-help">选择基础画风；更细的色彩、构图和禁用项可在高级设置中补充。</FieldDescription>
-            <div className="grid grid-cols-2 gap-2" role="group" aria-describedby="video-visual-style-help" aria-label="生图画风预设">
-              {VISUAL_STYLE_PRESETS.map((preset) => <Button
-                key={preset.id}
-                type="button"
-                variant="outline"
-                className={`${segmentClass} h-auto whitespace-normal py-2`}
-                aria-pressed={visualStylePreset === preset.id}
-                data-state={visualStylePreset === preset.id ? "checked" : "unchecked"}
-                onClick={() => update("visualInstructions", applyVisualStylePreset(visualInstructions, preset.id))}
-              >{preset.label}</Button>)}
-              <Button
-                type="button"
-                variant="outline"
-                className={`${segmentClass} col-span-2 h-auto whitespace-normal py-2`}
-                aria-pressed={visualStylePreset === null}
-                data-state={visualStylePreset === null ? "checked" : "unchecked"}
-                onClick={() => update("visualInstructions", applyVisualStylePreset(visualInstructions, null))}
-              >不使用预设</Button>
+        <section className="border-t border-[var(--border-subtle)] bg-[var(--bg-subtle)] p-5 md:p-7" aria-labelledby="production-settings-heading">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 id="production-settings-heading" className="text-base font-semibold">制作设置</h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">{state.draft.targetDurationSeconds / 60} 分钟 · {state.draft.visualDensity === "relaxed" ? "舒缓节奏" : state.draft.visualDensity === "compact" ? "紧凑节奏" : "标准节奏"} · {visualStyleLabel} · 竖屏 9:16 · {state.draft.webEnabled ? "联网查证" : "不联网"}</p>
+              <p className="mt-1 text-xs text-[var(--fg-tertiary)]">{promptInstructionsStatus(state.draft.scriptInstructions, state.draft.visualInstructions)}；这些设置会随方案一起冻结。</p>
             </div>
-          </FieldSet>
-          <div><h4 className="text-sm font-medium">输出规格</h4><p className="mt-2 font-mono text-sm">竖屏 · 9:16</p><p className="mt-1 font-mono text-xs text-[var(--fg-tertiary)]">1080 × 1920</p></div>
-          <FieldLabel className="flex w-full cursor-pointer items-start gap-3">
-            <Checkbox disabled={state.busy} checked={state.draft.webEnabled} onCheckedChange={(checked) => update("webEnabled", checked === true)} />
-            <span className="pt-2"><strong className="block text-sm font-medium">联网查证</strong><span className="mt-1 block text-sm leading-6 text-[var(--fg-secondary)]">{state.draft.webEnabled ? "生成方案时搜索并冻结可核验来源。当前保存草稿不会联网。" : "生成方案时不搜索外部资料，仅使用当前输入和参考资料。"}</span></span>
-          </FieldLabel>
-        </aside>
+            <VideoProductionSettingsDialog disabled={state.busy} settings={state.draft} onApply={(settings) => state.setDraft((current) => current ? { ...current, ...settings } : current)} />
+          </div>
+        </section>
       </div>
-
-      <section className="grid gap-5 border-t border-[var(--border-subtle)] px-5 py-6 md:px-7" aria-labelledby="advanced-settings-heading">
-        <div><h3 id="advanced-settings-heading" className="text-base font-semibold">高级设置</h3><p className="mt-1 text-sm leading-6 text-[var(--fg-secondary)]">低频配置不会占用主编辑区。</p></div>
-        <div className="flex flex-col gap-4 bg-[var(--bg-subtle)] p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><h4 className="text-sm font-medium">当前视频提示词补充</h4><p className="mt-1 text-sm text-[var(--fg-secondary)]">{promptInstructionsStatus(state.draft.scriptInstructions, state.draft.visualInstructions)} · 只影响当前视频</p></div>
-          <VideoPromptInstructionsDialog disabled={state.busy} scriptInstructions={state.draft.scriptInstructions} visualInstructions={state.draft.visualInstructions} onApply={(scriptInstructions, visualInstructions) => state.setDraft((current) => current ? { ...current, scriptInstructions, visualInstructions } : current)} />
-        </div>
-      </section>
 
       <section className="border-t border-[var(--border-subtle)] px-5 py-6 md:px-7" aria-labelledby="sources-heading">
         <h3 id="sources-heading" className="text-base font-semibold">来源</h3><p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">{planState?.plan ? `当前方案已冻结 ${planState.sources.length} 条联网来源，可通过顶部“查看当前方案”进入来源详情。` : state.draft.webEnabled ? "尚未生成方案。生成时会检索并冻结可核验来源。" : "本次未开启联网查证，方案将只依据当前输入和参考资料生成。"}</p>

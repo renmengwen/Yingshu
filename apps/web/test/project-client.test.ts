@@ -13,8 +13,9 @@ import {
   VideoPlanLauncher, videoPlanLaunchBlockReason, videoPlanLaunchConfirmation,
 } from "../src/projects/VideoPlanLauncher.tsx";
 import {
-  applyVisualStylePreset, instructionLimitMessage, promptInstructionsStatus, selectedVisualStylePreset,
-} from "../src/projects/VideoPromptInstructionsDialog.tsx";
+  applyVisualStylePreset, promptInstructionsStatus, selectedVisualStylePreset,
+} from "../src/projects/visual-style-presets.ts";
+import { instructionLimitMessage } from "../src/projects/VideoProductionSettingsDialog.tsx";
 import { VideoStageNavigation } from "../src/projects/VideoStageNavigation.tsx";
 
 test("项目与视频路由可安全编码并从刷新地址恢复", () => {
@@ -94,18 +95,11 @@ test("提示词层级身份固定且输入页呈现创作主次、可见操作�
   assert.match(html, /根据正文改编/);
   assert.match(html, /只参考表达风格/);
   assert.match(html, /作为内容资料/);
-  assert.match(html, /1 分钟/);
-  assert.match(html, /10 分钟/);
-  assert.match(html, /竖屏 · 9:16/);
-  assert.match(html, /1080 × 1920/);
-  assert.match(html, /生图画风/);
-  assert.match(html, /写实摄影/);
-  assert.match(html, /日系动漫/);
-  assert.match(html, /手绘线稿/);
-  assert.match(html, /不使用预设/);
-  assert.match(html, /当前视频提示词补充/);
+  assert.match(html, /制作设置/);
+  assert.match(html, /3.*分钟.*标准节奏.*自定义画风.*竖屏 9:16.*联网查证/);
   assert.match(html, /已设置：文案、画面/);
-  assert.match(html, /编辑提示词/);
+  assert.match(html, /编辑制作设置/);
+  assert.doesNotMatch(html, /10 分钟|生图画风|不使用预设|当前视频提示词补充|编辑提示词/);
   assert.match(html, /尚未生成方案。生成时会检索并冻结可核验来源/);
   assert.doesNotMatch(html, /<details|<summary|provider|费用|书籍|章节|系列|分集/);
 });
