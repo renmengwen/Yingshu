@@ -124,6 +124,7 @@ test("三种使用方式的真实 provider prompt 只包含各自字段白名单
       } else {
         for (const expected of ["TRANSCRIPT_PERSON_7788", "CLAIM_EVENT_7788", "STRUCTURE_EVENT_7788",
           "第二人称代入", "逐级升级", "危机反转", "AUDIENCE_NEED_SUMMARY"]) assert.match(providerPayload, new RegExp(expected, "u"));
+        assert.match(providerPayload, /"startMs":0.*"endMs":10000.*"technique":"ABSTRACT_METHOD_HOOK"/su);
         assert.doesNotMatch(providerPayload, /ABSTRACT_VISUAL_DENSITY|字幕辅助/u);
         assert.match(providerPayload, /评论洞察仅作受众解读.*来源边界、未核验说明和分析过程只写入 risks/su);
       }

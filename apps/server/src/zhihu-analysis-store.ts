@@ -123,7 +123,12 @@ export function enqueueZhihuAnalysis(database: DatabaseSync, input: {
       WHERE video_id=? AND answer_id=? AND config_hash=? AND invalidated_at IS NULL ORDER BY created_at DESC,id DESC LIMIT 1`)
       .get(input.videoId, input.answerId, configHash) as SnapshotRow | undefined;
     if (reusableRow?.status === "succeeded") { database.exec("COMMIT"); return { snapshot: snapshot(reusableRow), job: null, created: false, reusable: true }; }
-    let target = reusableRow ? snapshot(reusableRow) : null;
+    const reviewed = reusableRow && database.prepare(
+      `SELECT 1 FROM video_zhihu_analysis_selections WHERE snapshot_id=?
+       UNION SELECT 1 FROM video_zhihu_analysis_selection_events WHERE snapshot_id=? LIMIT 1`,
+    ).get(reusableRow.id, reusableRow.id);
+    // 已审核报告的 Hash 是审计凭据；重试必须另建快照，不能原地改写。
+    let target = reusableRow && !reviewed ? snapshot(reusableRow) : null;
     if (!target) {
       const previous = database.prepare("SELECT id FROM video_zhihu_analysis_snapshots WHERE video_id=? AND invalidated_at IS NULL LIMIT 1")
         .get(input.videoId);

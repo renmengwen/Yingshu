@@ -57,6 +57,16 @@ test("知乎快照、部分接受、权利事件与选择失效可恢复", async
     assert.equal(connection.database.prepare("SELECT COUNT(*) AS count FROM video_zhihu_analysis_selection_events").get()?.count, 2);
     assert.throws(() => connection.database.prepare("DELETE FROM video_zhihu_analysis_selection_events").run(), /append-only/u);
     assert.throws(() => connection.database.prepare("DELETE FROM video_zhihu_analysis_snapshots").run(), /append-only/u);
+
+    updateZhihuAnalysisSnapshot(connection.database, { snapshotId: completed.id,
+      status: "failed", completeness: "unavailable", completedAt: 7 });
+    const retry = enqueueZhihuAnalysis(connection.database, { projectId: project.id, videoId: video.id,
+      questionId: "9389089116", answerId: "1976331888235927140", config, now: 8 });
+    assert.notEqual(retry.snapshot.id, completed.id);
+    assert.equal(connection.database.prepare("SELECT invalidated_at FROM video_zhihu_analysis_snapshots WHERE id=?")
+      .get(completed.id)?.invalidated_at, 8);
+    updateZhihuAnalysisSnapshot(connection.database, { snapshotId: retry.snapshot.id,
+      status: "partial", completeness: "partial", evidenceHash: "a".repeat(64), report: report(), completedAt: 9 });
     assert.equal(connection.database.prepare("PRAGMA foreign_key_check").all().length, 0);
 
     connection.close(); connection = openDatabase(dataRoot);

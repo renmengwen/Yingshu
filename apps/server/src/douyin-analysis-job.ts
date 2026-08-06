@@ -113,13 +113,26 @@ function sanitizedMetadata(detail: DouyinVideoDetail) {
   return safe;
 }
 
-function transcriptEvidence(asr: DouyinAsrResult | null) {
+interface TranscriptEvidenceSegment {
+  id: string; startMs: number; endMs: number; text: string; status: "succeeded" | "failed";
+}
+
+function transcriptEvidence(asr: DouyinAsrResult | null): {
+  status: string; textHash: string; segments: TranscriptEvidenceSegment[]; missingRanges: Array<{ startMs: number; endMs: number }>;
+} {
   if (!asr) return { status: "not_requested", textHash: douyinSha256(""), segments: [], missingRanges: [] };
   return {
     status: asr.status,
     textHash: douyinSha256(asr.text.slice(0, 1_000_000)),
-    segments: asr.segments.map((segment) => ({ id: `asr-${segment.index + 1}`, startMs: segment.startMs,
-      endMs: segment.endMs, text: segment.text.slice(0, 20_000), status: segment.status === "succeeded" ? "succeeded" : "failed" })),
+    segments: asr.segments.flatMap((segment): TranscriptEvidenceSegment[] => {
+      if (segment.status !== "succeeded") return [{ id: `asr-${segment.index + 1}`, startMs: segment.startMs,
+        endMs: segment.endMs, text: "", status: "failed" as const }];
+      // 旧 checkpoint 可能没有细粒度字段；恢复时退回外层切片，不能让历史任务崩溃。
+      const detailed = segment.transcriptSegments?.length ? segment.transcriptSegments : [{ startMs: segment.startMs,
+        endMs: segment.endMs, text: segment.text }];
+      return detailed.map((item, index) => ({ id: `asr-${segment.index + 1}-${index + 1}`,
+        startMs: item.startMs, endMs: item.endMs, text: item.text.slice(0, 20_000), status: "succeeded" as const }));
+    }),
     missingRanges: asr.missingRanges,
   };
 }

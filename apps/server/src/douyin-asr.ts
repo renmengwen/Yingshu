@@ -23,6 +23,7 @@ export interface DouyinAsrSegment {
 export interface DouyinAsrSegmentResult extends Omit<DouyinAsrSegment, "status"> {
   status: "succeeded" | "failed" | "cancelled";
   text: string;
+  transcriptSegments: Array<{ startMs: number; endMs: number; text: string }>;
   error?: string;
 }
 
@@ -128,6 +129,26 @@ async function responseJson(response: Response) {
   try { return JSON.parse(text) as Record<string, unknown>; } catch { throw new Error("ASR 返回了无效 JSON"); }
 }
 
+interface ProviderTranscript {
+  text: string;
+  segments: Array<{ startMs: number; endMs: number; text: string }>;
+}
+
+function providerTranscript(payload: Record<string, unknown>, segment: DouyinAsrSegment): ProviderTranscript {
+  if (typeof payload.text !== "string" || !payload.text.trim()) throw new Error("ASR 未返回有效文本");
+  const values = Array.isArray(payload.segments) ? payload.segments : [];
+  const segments = values.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const row = value as Record<string, unknown>;
+    const start = typeof row.start === "number" && Number.isFinite(row.start) ? row.start : NaN;
+    const end = typeof row.end === "number" && Number.isFinite(row.end) ? row.end : NaN;
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    if (start < 0 || end <= start || !text || end * 1_000 > segment.endMs - segment.startMs + 1_000) return null;
+    return { startMs: segment.startMs + Math.round(start * 1_000), endMs: segment.startMs + Math.round(end * 1_000), text };
+  }).filter((value): value is { startMs: number; endMs: number; text: string } => value !== null);
+  return { text: payload.text.trim(), segments: segments.length ? segments : [{ startMs: segment.startMs, endMs: segment.endMs, text: payload.text.trim() }] };
+}
+
 async function callOpenAi(segment: DouyinAsrSegment, audio: Buffer, runtime: RuntimeModelConfig,
   fetchImpl: typeof fetch, timeoutMs: number, signal?: AbortSignal) {
   // multipart 还有字段与边界开销，预留 4 KiB 确保完整请求不会越过配置上限。
@@ -142,8 +163,7 @@ async function callOpenAi(segment: DouyinAsrSegment, audio: Buffer, runtime: Run
   }, timeoutMs, signal);
   const payload = await responseJson(response);
   if (!response.ok) throw new Error(`ASR 请求失败：HTTP ${response.status}`);
-  if (typeof payload.text !== "string" || !payload.text.trim()) throw new Error("ASR 未返回有效文本");
-  return payload.text.trim();
+  return providerTranscript(payload, segment);
 }
 
 async function callMimo(segment: DouyinAsrSegment, audio: Buffer, runtime: RuntimeModelConfig,
@@ -160,7 +180,7 @@ async function callMimo(segment: DouyinAsrSegment, audio: Buffer, runtime: Runti
   const message = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>).message : null;
   const text = message && typeof message === "object" ? (message as Record<string, unknown>).content : null;
   if (typeof text !== "string" || !text.trim()) throw new Error("ASR 未返回有效文本");
-  return text.trim();
+  return { text: text.trim(), segments: [{ startMs: segment.startMs, endMs: segment.endMs, text: text.trim() }] };
 }
 
 export async function transcribeDouyinAsrSegments(options: {
@@ -186,7 +206,7 @@ export async function transcribeDouyinAsrSegments(options: {
     }
     previousEnd = segment.endMs;
     if (options.signal?.aborted) {
-      results.push({ ...segment, status: "cancelled", text: "", error: "ASR 已取消" });
+      results.push({ ...segment, status: "cancelled", text: "", transcriptSegments: [], error: "ASR 已取消" });
       continue;
     }
     try {
@@ -195,13 +215,14 @@ export async function transcribeDouyinAsrSegments(options: {
       }
       const audio = await readFile(join(options.audioDirectory, segment.fileName));
       if (audio.length !== segment.bytes || sha256(audio) !== segment.sha256) throw new Error("ASR 音频片段 Hash 不匹配");
-      const text = model.protocol === "mimo-audio"
+      const transcript = model.protocol === "mimo-audio"
         ? await callMimo(segment, audio, options.runtime, fetchImpl, timeoutMs, options.signal)
         : await callOpenAi(segment, audio, options.runtime, fetchImpl, timeoutMs, options.signal);
-      results.push({ ...segment, status: "succeeded", text });
+      results.push({ ...segment, status: "succeeded", text: transcript.text, transcriptSegments: transcript.segments });
     } catch (error) {
       const cancelled = options.signal?.aborted || (error as Error).name === "AbortError";
       results.push({ ...segment, status: cancelled ? "cancelled" : "failed", text: "",
+        transcriptSegments: [],
         error: cancelled ? "ASR 已取消" : error instanceof Error ? error.message : "ASR 转写失败" });
     }
   }

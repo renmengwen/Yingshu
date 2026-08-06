@@ -155,7 +155,9 @@ export function buildFrozenDouyinPlanInput(input: {
     payload = { topic, coreQuestion, audienceAngle, ...method };
   } else {
     payload = { methodProfile: method.methodProfile, transcriptSegments: manifest.segments,
-      contentStructure: snapshot.report.narrative?.sections.map(({ role, summary }) => ({ role, summary })) ?? [],
+      contentStructure: snapshot.report.narrative?.sections.map(({ startMs, endMs, role, summary, technique, evidenceRefs }) => ({
+        startMs, endMs, role, summary, technique, evidenceRefs,
+      })) ?? [],
       sourceClaims: snapshot.report.content?.observations.map((item) => item.conclusion) ?? [],
       uncertainties: snapshot.report.risks.map((item) => item.summary),
       audienceInsights: { interpretationOnly: true,

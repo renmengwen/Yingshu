@@ -68,7 +68,8 @@ async function fixture(config: { extractFrames: boolean; transcribeAudio: boolea
       const path = join(options.outputDirectory, "asr-0001.mp3"); await mkdir(dirname(path), { recursive: true }); await writeFile(path, value);
       return [{ index: 0, startMs: 0, endMs: 20_000, fileName: "asr-0001.mp3", bytes: value.length, sha256: sha(value), status: "prepared" as const }]; },
     transcribeAsr: async (options) => { calls.transcribe += 1; const segment = options.segments[0]!;
-      return { status: "succeeded", text: "完整转写", segments: [{ ...segment, status: "succeeded", text: "完整转写" }], missingRanges: [],
+      return { status: "succeeded", text: "完整转写", segments: [{ ...segment, status: "succeeded", text: "完整转写",
+          transcriptSegments: [{ startMs: segment.startMs, endMs: segment.endMs, text: "完整转写" }] }], missingRanges: [],
         model: { providerId: "asr", model: "asr-model", protocol: "openai-transcription", baseUrl: "https://example.com", identityHash: "a".repeat(64) } }; },
     fetchComments: async () => { calls.comments += 1; return { status: "failed", failureKind: "platform_blocked", comments: [],
       fetchedAt: 1, pagesFetched: 0, truncated: false, interpretationOnly: true, diagnostic: { cache: "miss" } }; },

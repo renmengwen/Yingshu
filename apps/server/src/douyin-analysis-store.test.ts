@@ -147,6 +147,17 @@ test("分析快照、选择事件、下游失效和重启恢复保持一致", as
     ).get()?.count, 1);
     assert.throws(() => connection.database.prepare("UPDATE video_douyin_analysis_selection_events SET event_type='accept_partial'").run(), /append-only/u);
 
+    updateDouyinAnalysisSnapshot(connection.database, { snapshotId: completed.id,
+      status: "failed", completeness: "unavailable", completedAt: 32 });
+    const retry = enqueueDouyinAnalysis(connection.database, { projectId: project.id, videoId: video.id,
+      awemeId: "12345", sourceUrl: "https://www.douyin.com/video/12345", config, now: 33 });
+    assert.notEqual(retry.snapshot.id, completed.id);
+    assert.equal(connection.database.prepare("SELECT invalidated_at FROM video_douyin_analysis_snapshots WHERE id=?")
+      .get(completed.id)?.invalidated_at, 33);
+    updateDouyinAnalysisSnapshot(connection.database, { snapshotId: retry.snapshot.id,
+      status: "succeeded", completeness: "complete", evidenceHash: "a".repeat(64), report: report(), completedAt: 34 });
+    assert.equal(connection.database.prepare("PRAGMA foreign_key_check").all().length, 0);
+
     connection.close();
     connection = openDatabase(dataRoot);
     assert.equal(getCurrentDouyinAnalysisSnapshot(connection.database, project.id, video.id)?.status, "succeeded");

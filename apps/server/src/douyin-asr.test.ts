@@ -69,10 +69,11 @@ test("OpenAI multipart 请求按时间合并，失败段形成 partial 和缺失
         calls += 1; assert.equal(url, "https://asr.example/v1/audio/transcriptions");
         assert.equal((init!.headers as Record<string, string>).Authorization, "Bearer secret");
         const form = init!.body as FormData; assert.equal(form.get("model"), "whisper-1"); assert.ok(form.get("file") instanceof Blob);
-        return new Response(calls === 1 ? JSON.stringify({ text: "第一段" }) : JSON.stringify({ error: {} }),
+        return new Response(calls === 1 ? JSON.stringify({ text: "第一段", segments: [{ start: 0.5, end: 2.5, text: "第一段" }] }) : JSON.stringify({ error: {} }),
           { status: calls === 1 ? 200 : 500, headers: { "content-type": "application/json" } });
       }) as typeof fetch });
     assert.equal(result.status, "partial"); assert.equal(result.text, "第一段");
+    assert.deepEqual(result.segments[0]!.transcriptSegments, [{ startMs: 500, endMs: 2_500, text: "第一段" }]);
     assert.deepEqual(result.missingRanges, [{ startMs: 30_000, endMs: 60_000 }]);
     assert.equal(JSON.stringify(result).includes("secret"), false);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -94,6 +95,11 @@ test("MiMo JSON 请求形状正确；Hash 变化和取消均返回可序列化�
         return new Response(JSON.stringify({ choices: [{ message: { content: "完成" } }] }), { status: 200 });
       }) as typeof fetch });
     assert.equal(success.status, "succeeded"); assert.equal(success.text, "完成");
+    assert.deepEqual(success.segments[0]!.transcriptSegments, [{ startMs: 0, endMs: 1000, text: "完成" }]);
+
+    const timed = await transcribeDouyinAsrSegments({ segments: [segment], audioDirectory: root, runtime: runtime("openai-transcription"),
+      fetchImpl: async () => new Response(JSON.stringify({ text: "超界回退", segments: [{ start: -1, end: 99, text: "超界" }] }), { status: 200 }) });
+    assert.deepEqual(timed.segments[0]!.transcriptSegments, [{ startMs: 0, endMs: 1000, text: "超界回退" }]);
 
     await writeFile(path, "changed");
     const failed = await transcribeDouyinAsrSegments({ segments: [segment], audioDirectory: root, runtime: runtime("mimo-audio"),
