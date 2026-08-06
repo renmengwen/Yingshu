@@ -239,6 +239,41 @@ function reportObservations(report: DouyinAnalysisReport) {
     .flatMap((profile) => profile?.observations ?? []).concat(report.observations);
 }
 
+function deriveNarrativeMetrics(report: DouyinAnalysisReport, durationMs: number) {
+  const sections = report.narrative?.sections ?? [];
+  const metrics: Record<string, number> = {};
+  if (!sections.length) return metrics;
+  const firstMatching = (pattern: RegExp) => sections.find((section) => pattern.test(`${section.role} ${section.summary} ${section.technique}`));
+  const topic = firstMatching(/钩子|问题|主题|开场/u) ?? sections[0];
+  const value = firstMatching(/价值|方法|结论|兑现|答案|干货/u);
+  const turn = firstMatching(/冲突|反转|转折|升级|危机/u);
+  if (topic) metrics.topicFirstMs = topic.startMs;
+  if (value) metrics.firstValueDeliveryMs = value.startMs;
+  if (turn) metrics.firstTurnMs = turn.startMs;
+  const ctaSections = sections.filter((section) => /行动|CTA|关注|评论|点赞|结尾|回扣/u.test(`${section.role} ${section.summary}`));
+  if (ctaSections.length) metrics.ctaDurationMs = ctaSections.reduce((sum, section) => sum + section.endMs - section.startMs, 0);
+  sections.forEach((section, index) => {
+    const duration = section.endMs - section.startMs;
+    metrics[`narrativeSection${index + 1}DurationMs`] = duration;
+    metrics[`narrativeSection${index + 1}Ratio`] = duration / durationMs;
+  });
+  return metrics;
+}
+
+function validateNarrativeSections(report: DouyinAnalysisReport, input: DouyinAnalysisProviderInput) {
+  const sections = report.narrative?.sections ?? [];
+  let previousEnd = 0;
+  for (const section of sections) {
+    if (section.startMs < previousEnd || section.endMs > input.deterministic.durationMs) {
+      throw new Error("叙事段时间线必须按顺序且位于视频时长内");
+    }
+    if (section.evidenceRefs.some((ref) => !input.validEvidenceRefs.has(ref))) {
+      throw new Error("叙事段包含无法回读的证据引用");
+    }
+    previousEnd = section.endMs;
+  }
+}
+
 function validateModelBoundary(report: DouyinAnalysisReport, input: DouyinAnalysisProviderInput, metrics: Record<string, number>) {
   if (canonicalDouyinJson(report.evidence) !== canonicalDouyinJson(input.evidence)) throw new Error("模型返回的冻结证据摘要不一致");
   if (!report.pacing || canonicalDouyinJson(report.pacing.metrics) !== canonicalDouyinJson(metrics)) {
@@ -317,6 +352,7 @@ function buildPrompt(payload: ReturnType<typeof promptPayload>, correction?: str
     "只描述本视频观察到的特征，不推断博主、作者或账号的长期稳定风格；不得生成爆款、原创度、抄袭度、账号或综合评分。",
     "inference 至少引用两条证据；若只能引用一条，conclusion 必须明确说明单一证据限制。unknown 不得引用证据。",
     "pacing.metrics 必须逐字复用 deterministicMetrics；evidence 必须逐字复用 frozenEvidenceSummary，不得估算或改写。",
+    "narrative.sections 必须按视频时间顺序输出真实叙事节点；每段 startMs/endMs 必须来自带时间戳转写证据，不能使用 180 秒切片边界代替。标注钩子、人物建立、价值兑现、冲突、反转、升级、高潮、回扣、结尾等能从证据确认的节点；无法确认时减少节点，不要编造。",
     "comments 为 null 时 audience=null 且 audience availability=unavailable；评论存在时 interpretationOnly 必须为 true，评论纠正只进入待核验风险。",
     "frameObservations 为空时 visual=null，visualOverall/visualOpening/narrationVisualAlignment 均为 unavailable；有限静态帧不得写成逐帧运动事实。",
     ...(correction ? [`上一次完整 JSON 未通过严格合同：${correction}`, "只纠正输出结构和合同字段，不改变下方冻结证据与确定性指标；重新输出完整 JSON。"] : []),
@@ -388,7 +424,15 @@ export function createDouyinAnalysisProvider(config: ChapterTextModelConfig, fet
     };
     const parse = (value: unknown) => {
       const report = parseDouyinAnalysisReport(value, input.validEvidenceRefs);
-      validateModelBoundary(report, effectiveInput, metrics);
+      validateNarrativeSections(report, effectiveInput);
+      const derivedMetrics = deriveNarrativeMetrics(report, effectiveInput.deterministic.durationMs);
+      if (report.narrative?.sections.length && report.pacing) {
+        report.pacing = { ...report.pacing!, metrics: {
+          ...report.pacing!.metrics,
+          ...derivedMetrics,
+        } };
+      }
+      validateModelBoundary(report, effectiveInput, { ...metrics, ...derivedMetrics });
       return report;
     };
     const initial = await callModel(prompt, "douyin-analysis:report:initial");

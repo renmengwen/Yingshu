@@ -114,8 +114,8 @@ function methodPayload(report: DouyinAnalysisReport) {
       narrationPatterns: abstractPatterns(narrative),
       pacingStatus: report.availability.pacing.status,
       // 粗粒度 ASR 会扭曲平均句长等指标；只传递不依赖分句质量的确定性节奏量。
-      pacingMetrics: Object.fromEntries(["totalCharacters", "charactersPerMinute", "first15SecondsCharacters", "videoDurationMs"]
-        .flatMap((key) => typeof pacingMetrics[key] === "number" ? [[key, pacingMetrics[key]]] : [])),
+      pacingMetrics: Object.fromEntries(Object.entries(pacingMetrics)
+        .filter(([, value]) => typeof value === "number" && Number.isFinite(value))),
       visualPatterns: abstractPatterns(visual),
     },
   };
@@ -155,8 +155,11 @@ export function buildFrozenDouyinPlanInput(input: {
     payload = { topic, coreQuestion, audienceAngle, ...method };
   } else {
     payload = { methodProfile: method.methodProfile, transcriptSegments: manifest.segments,
-      contentStructure: snapshot.report.narrative?.sections.map(({ startMs, endMs, role, summary, technique, evidenceRefs }) => ({
-        startMs, endMs, role, summary, technique, evidenceRefs,
+      contentStructure: snapshot.report.narrative?.sections.map(({ startMs, endMs, role, summary, technique, evidenceRefs }, index) => ({
+        startMs, endMs, durationMs: endMs - startMs,
+        durationRatio: typeof snapshot.report.pacing?.metrics.videoDurationMs === "number" && snapshot.report.pacing.metrics.videoDurationMs > 0
+          ? (endMs - startMs) / snapshot.report.pacing.metrics.videoDurationMs : 0,
+        order: index + 1, role, summary, technique, evidenceRefs,
       })) ?? [],
       sourceClaims: snapshot.report.content?.observations.map((item) => item.conclusion) ?? [],
       uncertainties: snapshot.report.risks.map((item) => item.summary),
