@@ -8,6 +8,10 @@ import { pipeline } from "node:stream/promises";
 import { runVideoProcess } from "./ffmpeg-video.js";
 
 const DEFAULT_MAX_VIDEO_BYTES = 512 * 1024 * 1024;
+const DOUYIN_MEDIA_HEADERS = {
+  Referer: "https://www.douyin.com/",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+} as const;
 const HASH = /^[0-9a-f]{64}$/u;
 
 export interface VerifiedDouyinMediaUrl {
@@ -197,7 +201,12 @@ export async function downloadDouyinVideo(options: {
   const target = await controlledTarget(options.dataRoot, options.relativePath);
   const temporary = `${target.path}.${randomUUID()}.tmp`;
   try {
-    const response = await (options.fetch ?? fetch)(url, { redirect: "error", signal: options.signal });
+    // 抖音 CDN 会拒绝缺少来源页和浏览器身份的直链请求；请求头固定且不携带 Cookie。
+    const response = await (options.fetch ?? fetch)(url, {
+      redirect: "error",
+      signal: options.signal,
+      headers: DOUYIN_MEDIA_HEADERS,
+    });
     if (!response.ok || !response.body) throw new Error(`视频下载失败：HTTP ${response.status}`);
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) throw new Error("视频下载超过字节上限");

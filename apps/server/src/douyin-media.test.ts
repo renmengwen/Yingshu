@@ -47,7 +47,9 @@ test("固定总数抽帧按短视频中点和长视频开头分层规划", () =>
 test("受控流式下载校验来源、上限、magic、Hash 和链接逃逸", async () => {
   const root = await mkdtemp(join(tmpdir(), "yingshu-douyin-download-"));
   const fakeMp4 = Buffer.concat([Buffer.from([0, 0, 0, 20]), Buffer.from("ftypisom"), Buffer.alloc(24)]);
+  const requestHeaders: Array<{ referer?: string; userAgent?: string }> = [];
   const server = createServer((request, response) => {
+    requestHeaders.push({ referer: request.headers.referer, userAgent: request.headers["user-agent"] });
     response.writeHead(200, { "content-type": "video/mp4" });
     response.end(request.url === "/large" ? Buffer.concat([fakeMp4, Buffer.alloc(100)]) : fakeMp4);
   });
@@ -61,6 +63,8 @@ test("受控流式下载校验来源、上限、magic、Hash 和链接逃逸", a
       relativePath: "douyin/snapshot/video.mp4", maxBytes: 1024 });
     assert.equal(file.bytes, fakeMp4.length);
     assert.deepEqual(await readFile(join(root, "douyin/snapshot/video.mp4")), fakeMp4);
+    assert.equal(requestHeaders[0]?.referer, "https://www.douyin.com/");
+    assert.match(requestHeaders[0]?.userAgent ?? "", /^Mozilla\/5\.0/u);
     await assert.rejects(downloadDouyinVideo({ source: { url: url.replace("/video", "/large"), source: "douyin-detail" },
       dataRoot: root, relativePath: "douyin/large.mp4", maxBytes: 50 }), /字节上限/);
     assert.deepEqual(await readdir(join(root, "douyin")), ["snapshot"]);
