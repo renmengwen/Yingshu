@@ -35,9 +35,10 @@ function report(partialAsr = false): DouyinAnalysisReport {
       observation("audienceAngle", "冻结受众角度"), observation("claim", "CLAIM_EVENT_7788")] },
     narrative: { sections: [{ startMs: 0, endMs: 10_000, role: "问题开场", summary: "STRUCTURE_EVENT_7788",
       technique: "ABSTRACT_METHOD_HOOK", evidenceRefs: ["asr:0"] }], observations: [observation("narrative", "ABSTRACT_METHOD_ARC")] },
-    pacing: { metrics: { questionRatio: 0.2 }, observations: [] },
+    pacing: { metrics: { questionRatio: 0.2 }, observations: [observation("pacing", "第二人称代入，冲突范围连续扩大，并以危机出手推动局势逆转")] },
     visual: { observations: [observation("visual", "ABSTRACT_VISUAL_DENSITY")] },
-    audioSubtitle: null,
+    audioSubtitle: { observations: [{ dimension: "subtitle", conclusion: "无法确认字幕状态", evidenceRefs: [],
+      confidence: "low", nature: "unknown" }] },
     audience: { interpretationOnly: true, observations: [observation("audience", "AUDIENCE_NEED_SUMMARY")] },
     observations: [], risks: [{ code: "uncertain", summary: "UNCERTAINTY_SUMMARY", evidenceRefs: ["asr:0"] }],
   };
@@ -121,8 +122,10 @@ test("三种使用方式的真实 provider prompt 只包含各自字段白名单
         assert.match(providerPayload, /冻结抖音选题|冻结核心问题|冻结受众角度|https:\/\/example\.com\/independent/u);
         assert.doesNotMatch(providerPayload, /TRANSCRIPT_PERSON_7788|CLAIM_EVENT_7788|STRUCTURE_EVENT_7788/u);
       } else {
-        assert.match(providerPayload, /TRANSCRIPT_PERSON_7788|CLAIM_EVENT_7788|STRUCTURE_EVENT_7788/u);
-        assert.doesNotMatch(providerPayload, /ABSTRACT_VISUAL_DENSITY/u);
+        for (const expected of ["TRANSCRIPT_PERSON_7788", "CLAIM_EVENT_7788", "STRUCTURE_EVENT_7788",
+          "第二人称代入", "逐级升级", "危机反转", "AUDIENCE_NEED_SUMMARY"]) assert.match(providerPayload, new RegExp(expected, "u"));
+        assert.doesNotMatch(providerPayload, /ABSTRACT_VISUAL_DENSITY|字幕辅助/u);
+        assert.match(providerPayload, /评论洞察仅作受众解读.*来源边界、未核验说明和分析过程只写入 risks/su);
       }
       assert.equal(value.connection.database.prepare("SELECT status FROM videos WHERE id=(SELECT id FROM videos LIMIT 1)")
         .get()?.status, "awaiting_review");

@@ -81,10 +81,14 @@ function conclusion(report: DouyinAnalysisReport, dimension: string) {
 }
 
 const ABSTRACT_METHOD_PATTERNS = [
-  ["问题开场", /问题|提问|设问/u], ["结果前置", /结果前置|先给结果|结论前置/u],
-  ["冲突开场", /冲突|矛盾/u], ["利益承诺", /利益|收益|承诺/u], ["身份反转", /身份反转/u],
+  ["问题开场", /问题开场|开场.*(?:问题|提问|设问)|(?:问题|提问|设问).*开场/u], ["结果前置", /结果前置|先给结果|结论前置/u],
+  ["冲突开场", /冲突开场|开场.*(?:冲突|矛盾)/u], ["利益承诺", /利益承诺|开场.*(?:利益|收益).*承诺/u], ["身份反转", /身份反转/u],
   ["悬念推进", /悬念/u], ["分段解释", /解释|拆解|分段/u], ["举例说明", /举例|案例/u],
   ["转折推进", /转折|反转/u], ["总结收束", /总结|收束|结尾/u], ["行动号召", /行动号召|CTA/u],
+  ["第二人称代入", /第二人称|代入/u], ["反差塑造", /反差|并置/u],
+  ["逐级升级", /递进|逐级|连续扩大|抬高.*层级/u], ["危机反转", /危机.*出手.*反转|危机.*局势逆转/u],
+  ["重复意象", /重复意象|重复出现|标志性细节/u], ["首尾呼应", /首尾呼应|回扣开篇|主题闭环/u],
+  ["直接引语", /直接引语|对话/u], ["动作细节", /动作细节|生活细节/u], ["高信息密度", /信息密集|高信息密度/u],
   ["高密度画面", /高密度/u], ["低密度画面", /低密度/u], ["字幕辅助", /字幕/u],
 ] as const;
 
@@ -93,19 +97,27 @@ function abstractPatterns(values: readonly string[]) {
     .map(([label]) => label);
 }
 
+function usableConclusions(profile: { observations: DouyinAnalysisReport["observations"] } | null) {
+  return profile?.observations.filter((item) => item.nature !== "unknown").map((item) => item.conclusion) ?? [];
+}
+
 function methodPayload(report: DouyinAnalysisReport) {
   const narrative = [...(report.narrative?.sections.flatMap((item) => [item.role, item.technique]) ?? []),
-    ...(report.narrative?.observations.map((item) => item.conclusion) ?? [])];
-  const visual = report.visual?.observations.map((item) => item.conclusion) ?? [];
+    ...usableConclusions(report.narrative), ...usableConclusions(report.pacing),
+    ...usableConclusions(report.audioSubtitle),
+    ...report.observations.filter((item) => item.nature !== "unknown").map((item) => item.conclusion)];
+  const visual = usableConclusions(report.visual);
+  const pacingMetrics = report.pacing?.metrics ?? {};
   return {
     methodProfile: {
       // 自由文本只参与服务端分类，实际 Prompt 仅携带固定抽象标签，避免模型把人名、事件或原句藏入“方法”字段。
       narrationPatterns: abstractPatterns(narrative),
-      pacingMetrics: report.pacing?.metrics ?? {},
+      pacingStatus: report.availability.pacing.status,
+      // 粗粒度 ASR 会扭曲平均句长等指标；只传递不依赖分句质量的确定性节奏量。
+      pacingMetrics: Object.fromEntries(["totalCharacters", "charactersPerMinute", "first15SecondsCharacters", "videoDurationMs"]
+        .flatMap((key) => typeof pacingMetrics[key] === "number" ? [[key, pacingMetrics[key]]] : [])),
       visualPatterns: abstractPatterns(visual),
     },
-    audienceNeeds: [],
-    audienceRisks: [],
   };
 }
 
@@ -142,11 +154,14 @@ export function buildFrozenDouyinPlanInput(input: {
     if (!topic || !coreQuestion || !audienceAngle) throw new VideoPlanError(409, "抖音报告缺少可冻结的选题、核心问题或受众角度");
     payload = { topic, coreQuestion, audienceAngle, ...method };
   } else {
-    payload = { transcriptSegments: manifest.segments,
+    payload = { methodProfile: method.methodProfile, transcriptSegments: manifest.segments,
       contentStructure: snapshot.report.narrative?.sections.map(({ role, summary }) => ({ role, summary })) ?? [],
       sourceClaims: snapshot.report.content?.observations.map((item) => item.conclusion) ?? [],
       uncertainties: snapshot.report.risks.map((item) => item.summary),
-      audienceNeeds: method.audienceNeeds, audienceRisks: method.audienceRisks };
+      audienceInsights: { interpretationOnly: true,
+        observations: snapshot.report.audience?.observations
+          .filter((item) => item.nature !== "unknown")
+          .map(({ conclusion, confidence, nature }) => ({ conclusion, confidence, nature })) ?? [] } };
   }
   return { snapshotId: snapshot.id, usageRole: selection.usageRole, creativeAngle: selection.creativeAngle,
     evidenceHash: snapshot.evidenceHash, reportHash: snapshot.reportHash, payload };

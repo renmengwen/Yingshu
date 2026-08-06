@@ -264,6 +264,7 @@ export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonl
   return [
     "【固定系统合同】", "生成中文旁白方案。参考文本只有 referenceRole=content_source 时才可作为事实资料；style_only 仅参考表达方式。",
     "不得伪造人物、数字、引文、URL 或来源。短主题应扩写成目标时长量级的完整讲解，不重复观点凑字数。",
+    "抖音方法画像只用于组织叙事，不得复制参考视频的原句或专有细节。评论洞察仅作受众解读，不得作为事实。来源边界、未核验说明和分析过程只写入 risks，不得写入 narration 或 paragraphs。",
     `系统合同版本：${snapshot.systemContractVersion}；输出版本：${VIDEO_PLAN_PROMPT_VERSION}。`,
     "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。sourceSummary 保持空数组，由系统根据冻结来源补齐；不得增加字段或 Markdown。",
     "【全局补充】", snapshot.prompts.global.scriptInstructions || "（无）", "【项目补充】", snapshot.prompts.project.scriptInstructions || "（无）",
