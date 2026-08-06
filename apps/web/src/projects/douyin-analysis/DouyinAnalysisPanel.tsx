@@ -87,6 +87,6 @@ export function DouyinAnalysisPanel({ projectId, videoId, state }: {
         {state.selectionDirty ? <p className="text-sm text-[var(--warning)]">{snapshot.status === "partial" && !state.acceptPartial ? "请先确认接受部分分析结果。" : state.usageRole === "content_source" && !state.rightsConfirmed ? "请先确认内容使用权利。" : "使用方式将在停止修改后自动保存。"}</p> : null}
       </section> : snapshot && state.summary?.blockReasons.length ? <Alert><AlertTitle>当前分析仍有阻断项</AlertTitle><AlertDescription>{state.summary.blockReasons.join("；")}。服务端门禁满足后，使用方式将自动保存。</AlertDescription></Alert> : null}
     </div>
-    {snapshot ? <DouyinAnalysisDetails projectId={projectId} videoId={videoId} snapshotId={snapshot.id} kind={detailKind} onClose={() => setDetailKind(null)} returnFocusRef={detailTriggerRef} /> : null}
+    {snapshot ? <DouyinAnalysisDetails projectId={projectId} videoId={videoId} snapshot={snapshot} kind={detailKind} onClose={() => setDetailKind(null)} returnFocusRef={detailTriggerRef} /> : null}
   </section>;
 }

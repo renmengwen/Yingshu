@@ -10,6 +10,7 @@ import {
   validateDouyinDraft,
 } from "../src/projects/douyin-analysis/logic.ts";
 import { DEFAULT_DOUYIN_ANALYSIS_CONFIG, type DouyinAnalysisSummary, type DouyinAvailabilityDimension } from "../src/projects/douyin-analysis/types.ts";
+import { DouyinDetailContent } from "../src/projects/douyin-analysis/DouyinDetailContent.tsx";
 import { VideoInputContent } from "../src/projects/VideoInputStage.tsx";
 import type { VideoInputDraft } from "../src/projects/types.ts";
 
@@ -35,6 +36,27 @@ test("证据摘要关闭抽帧时保留数量但明确未开启，评论边界�
   assert.equal(rows.find((row) => row.id === "frames")?.evidence, "12 张计划");
   assert.equal(rows.find((row) => row.id === "frames")?.status, "not_requested");
   assert.match(rows.find((row) => row.id === "comments")?.summary ?? "", /不进入本次报告/);
+  assert.equal(rows.find((row) => row.id === "metadata")?.detail, "metadata");
+});
+
+test("五个摘要入口渲染各自的中文结构化详情而非统一 JSON", () => {
+  const snapshot = {
+    id: "snapshot_1", sourceUrl: "https://www.douyin.com/video/12345", config: { ...DEFAULT_DOUYIN_ANALYSIS_CONFIG, sourceText: "链接" },
+    status: "succeeded", completeness: "complete", evidenceHash: "a".repeat(64), reportHash: "b".repeat(64),
+    availability: null, evidence: null, createdAt: 1_700_000_000_000, completedAt: 1_700_000_001_000, invalidatedAt: null,
+  } as const;
+  const render = (kind: Parameters<typeof DouyinDetailContent>[0]["kind"], value: unknown) => renderToString(createElement(DouyinDetailContent, { kind, value, snapshot })).replaceAll("<!-- -->", "");
+  const metadata = render("metadata", null);
+  const transcript = render("transcript", { status: "succeeded", textHash: "hash", segments: [{ id: "asr-1", startMs: 0, endMs: 1_000, text: "转写正文", status: "succeeded" }], missingRanges: [] });
+  const frames = render("frames", [{ index: 0, timestampMs: 2_000, status: "succeeded", artifactId: "frame-0" }]);
+  const comments = render("comments", [{ id: "comment-1", authorId: "anon-1", text: "评论正文", likeCount: 3, replies: [{ id: "reply-1", text: "回复正文" }] }]);
+  const report = render("report", { evidence: { completeness: "complete", asrTextCharacters: 4, succeededFrames: 1, commentCount: 1 }, availability: { pacing: { status: "available", reason: "节奏证据完整" } }, observations: [{ dimension: "pacing", nature: "observation", confidence: "high", conclusion: "节奏清晰", evidenceRefs: ["asr-1"] }], risks: [] });
+  assert.match(metadata, /来源链接.*证据 Hash/su);
+  assert.match(transcript, /分段转写.*转写正文/su);
+  assert.match(frames, /关键帧 01.*00:02/su);
+  assert.match(comments, /评论样本.*评论正文.*回复正文/su);
+  assert.match(report, /分析维度可用性.*节奏证据完整.*节奏清晰/su);
+  for (const html of [metadata, transcript, frames, comments, report]) assert.doesNotMatch(html, /<pre/u);
 });
 
 test("三种使用方式固定且 partial 只提交真实缺失维度", () => {

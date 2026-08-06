@@ -89,4 +89,4 @@ export interface DouyinTranscriptResponse { ok: true; transcript: unknown }
 export interface DouyinFramesResponse { ok: true; items: unknown[] }
 export interface DouyinCommentsPage { ok: true; page: number; pageSize: number; total: number; items: unknown[] }
 
-export type DouyinDetailKind = "report" | "transcript" | "frames" | "comments";
+export type DouyinDetailKind = "metadata" | "report" | "transcript" | "frames" | "comments";

@@ -95,7 +95,7 @@ export function acceptedMissingDimensions(
 
 export function evidenceRows(evidence: DouyinEvidenceSummary | null, config: DouyinAnalysisConfig) {
   return [
-    { id: "metadata", name: "视频资料", evidence: "元数据", status: evidence?.metadataStatus ?? "pending", summary: evidence ? "已冻结视频身份与抓取时刻数据" : "等待获取视频资料", detail: "report" as const },
+    { id: "metadata", name: "视频资料", evidence: "元数据", status: evidence?.metadataStatus ?? "pending", summary: evidence ? "已冻结视频身份与抓取时刻数据" : "等待获取视频资料", detail: "metadata" as const },
     { id: "asr", name: "ASR", evidence: "音频与转写", status: config.transcribeAudio ? evidence?.asrStatus ?? "pending" : "not_requested", summary: config.transcribeAudio ? (evidence ? `${evidence.asrTextCharacters.toLocaleString("zh-CN")} 字，覆盖 ${(evidence.asrCoveredDurationMs / 1000).toFixed(1)} 秒` : "等待执行音频转写") : "本次未开启 ASR", detail: "transcript" as const },
     { id: "frames", name: "关键帧", evidence: `${config.frameCount} 张计划`, status: config.extractFrames ? (evidence && evidence.failedFrames ? "partial" : evidence?.videoStatus ?? "pending") : "not_requested", summary: config.extractFrames ? (evidence ? `成功 ${evidence.succeededFrames} 张，失败 ${evidence.failedFrames} 张` : "等待抽取关键帧") : "本次未开启抽帧", detail: "frames" as const },
     { id: "comments", name: "评论", evidence: "受众信号", status: config.analyzeComments ? (evidence ? "succeeded" : "pending") : "not_requested", summary: config.analyzeComments ? (evidence ? `已获取 ${evidence.commentCount} 条；仅作受众解读` : "等待获取评论和回复") : "评论分析未开启，不进入本次报告", detail: "comments" as const },
