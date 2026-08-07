@@ -12,6 +12,7 @@ import { JobWorker } from "./job-worker.js";
 import { getJob } from "./job-store.js";
 import { createProject, createVideo, deleteProject } from "./project-video-store.js";
 import { approveVideoPlan, createVideoPlanJobHandler, enqueueVideoPlanJob, getVideoPlan, VIDEO_PLAN_JOB_TYPE } from "./video-plan-service.js";
+import { saveVideoVisualRevision } from "./video-plan-store.js";
 import { createVideoImageJobHandler } from "./video-image-job.js";
 import { VIDEO_IMAGE_JOB_TYPE } from "./video-image-contract.js";
 import { approveVideoImageCandidate, cleanupUnreferencedVideoImageFiles, enqueueVideoImageBatch, getVideoImageWorkspace, uploadVideoImageCandidate } from "./video-image-store.js";
@@ -19,7 +20,7 @@ import { approveVideoImageCandidate, cleanupUnreferencedVideoImageFiles, enqueue
 const textConfig = { baseUrl: "https://example.invalid/v1", apiKey: "secret", model: "text-fixture", providerId: "fixture" };
 const imageConfig = { baseUrl: "https://example.invalid/v1", apiKey: "secret", model: "image-fixture", providerId: "fixture" };
 
-async function approvedFixture() {
+async function approvedFixture(visualCount = 1) {
   const dataRoot = await mkdtemp(join(tmpdir(), "yingshu-video-images-"));
   const connection = openDatabase(dataRoot);
   const project = createProject(connection.database, { name: "图片测试" }, 10);
@@ -35,9 +36,11 @@ async function approvedFixture() {
   const handler = createVideoPlanJobHandler(connection.database, textConfig, async ({ stage, prompt }) => stage === "script"
     ? { title: "蓝天", summary: "散射", narration,
       paragraphs: [{ text: narration }], sourceSummary: [], risks: [] }
-    : { visuals: [{ paragraphId: prompt.match(/paragraph_[0-9a-f]{20}/u)![0], purpose: "解释散射",
-      description: "蓝色光线在大气层中散射", prompt: "vertical scientific illustration of blue light scattering",
-      negativePrompt: "watermark, text", suggestedDurationSeconds: 30, weight: 1 }] });
+    : { visuals: Array.from({ length: visualCount }, (_, index) => ({
+      paragraphId: prompt.match(/paragraph_[0-9a-f]{20}/u)![0], purpose: "解释散射",
+      description: `蓝色光线在大气层中散射 ${index + 1}`, prompt: `vertical scientific illustration of blue light scattering ${index + 1}`,
+      negativePrompt: "watermark, text", suggestedDurationSeconds: 30, weight: 1,
+    })) });
   const worker = new JobWorker(connection.database, { [VIDEO_PLAN_JOB_TYPE]: handler }, { workerId: "plan", leaseMs: 5000, heartbeatMs: 100 });
   await worker.runOne();
   assert.equal(getJob(connection.database, queued.job.id)?.status, "succeeded", getJob(connection.database, queued.job.id)?.errorMessage ?? "");
@@ -45,7 +48,8 @@ async function approvedFixture() {
   approveVideoPlan(connection.database, project.id, video.id, { snapshotId: plan.snapshotId,
     scriptRevisionId: plan.script.id, visualRevisionId: plan.visual.id }, 70);
   assert.equal(queued.job.id.length > 0, true);
-  return { dataRoot, connection, project, video, visualId: plan.visual.visuals[0]!.id };
+  return { dataRoot, connection, project, video, visualId: plan.visual.visuals[0]!.id,
+    visualIds: plan.visual.visuals.map((visual) => visual.id) };
 }
 
 function png(path: string) {
@@ -128,6 +132,56 @@ test("上游输入失效会取消尚未执行的图片 Job", async () => {
     assert.equal(value.connection.database.prepare(
       "SELECT status FROM video_image_batch_items WHERE job_id = ?",
     ).get(jobId)?.status, "cancelled");
+  } finally {
+    value.connection.close();
+    await rm(value.dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("只修改单个画面后，其他画面的候选与批准仍保持当前", async () => {
+  const value = await approvedFixture(4);
+  const fixturePath = join(value.dataRoot, "fixture.png");
+  png(fixturePath);
+  try {
+    const queued = enqueueVideoImageBatch(value.connection.database, {
+      projectId: value.project.id, videoId: value.video.id, mode: "missing", idempotencyKey: "all-4",
+      providerId: imageConfig.providerId, model: imageConfig.model,
+    });
+    const handler = createVideoImageJobHandler(value.connection.database, value.dataRoot, async () => imageConfig, {
+      generate: async () => ({ bytes: await readFile(fixturePath) }),
+    });
+    const worker = new JobWorker(value.connection.database, { [VIDEO_IMAGE_JOB_TYPE]: handler },
+      { workerId: "images-4", leaseMs: 5000, heartbeatMs: 100 });
+    for (const _ of queued.batch!.items) await worker.runOne();
+    let workspace = getVideoImageWorkspace(value.connection.database, value.project.id, value.video.id);
+    assert.equal(workspace.candidates.filter((item) => item.currentCompatible).length, 4);
+    const firstCandidate = workspace.candidates.find((item) => item.visualId === value.visualIds[0])!;
+    workspace = approveVideoImageCandidate(value.connection.database, value.dataRoot, {
+      projectId: value.project.id, videoId: value.video.id, visualId: value.visualIds[0]!, candidateId: firstCandidate.id,
+      expectedGateRevision: workspace.gateRevision,
+    });
+
+    const plan = getVideoPlan(value.connection.database, value.project.id, value.video.id)!;
+    saveVideoVisualRevision(value.connection.database, value.project.id, value.video.id, {
+      snapshotId: plan.snapshotId, baseRevision: plan.visual.revision, scriptRevisionId: plan.script.id,
+      visuals: plan.visual.visuals.map((visual) => visual.id === value.visualIds[3]
+        ? { ...visual, prompt: `${visual.prompt} revised` } : visual),
+    }, 80);
+    const revised = getVideoPlan(value.connection.database, value.project.id, value.video.id)!;
+    approveVideoPlan(value.connection.database, value.project.id, value.video.id, {
+      snapshotId: revised.snapshotId, scriptRevisionId: revised.script.id, visualRevisionId: revised.visual.id,
+    }, 90);
+
+    workspace = getVideoImageWorkspace(value.connection.database, value.project.id, value.video.id);
+    assert.equal(workspace.candidates.filter((item) => item.currentCompatible).length, 3);
+    assert.equal(workspace.candidates.find((item) => item.visualId === value.visualIds[3])!.currentCompatible, false);
+    assert.equal(workspace.approvals.find((item) => item.visualId === value.visualIds[0])?.candidateId, firstCandidate.id);
+    const missing = enqueueVideoImageBatch(value.connection.database, {
+      projectId: value.project.id, videoId: value.video.id, mode: "missing", idempotencyKey: "only-4",
+      providerId: imageConfig.providerId, model: imageConfig.model,
+    });
+    assert.equal(missing.batch?.plannedCount, 1);
+    assert.deepEqual(missing.batch?.items.map((item) => item.visualId), [value.visualIds[3]]);
   } finally {
     value.connection.close();
     await rm(value.dataRoot, { recursive: true, force: true });

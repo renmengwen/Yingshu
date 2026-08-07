@@ -73,16 +73,22 @@ export function permitStillCurrent(database: DatabaseSync, permit: VideoImagePer
     const current = requireVideoImagePermit(database, permit.projectId, permit.videoId, permit.visualId)[0];
     return !!current && current.planSnapshotId === permit.planSnapshotId && current.planSnapshotHash === permit.planSnapshotHash &&
       current.scriptRevisionId === permit.scriptRevisionId && current.scriptContentHash === permit.scriptContentHash &&
-      current.visualRevisionId === permit.visualRevisionId && current.visualContentHash === permit.visualContentHash &&
       current.promptHash === permit.promptHash;
   } catch { return false; }
+}
+
+function candidateMatchesPermit(row: CandidateRow, permit: VideoImagePermit) {
+  return row.visual_id === permit.visualId && row.plan_snapshot_id === permit.planSnapshotId &&
+    row.plan_snapshot_hash === permit.planSnapshotHash && row.script_revision_id === permit.scriptRevisionId &&
+    row.script_content_hash === permit.scriptContentHash && row.prompt_hash === permit.promptHash;
 }
 
 function compatibleCandidateExists(database: DatabaseSync, permit: VideoImagePermit) {
   return !!database.prepare(
     `SELECT 1 FROM video_image_candidates WHERE video_id=? AND visual_id=? AND plan_snapshot_id=?
-     AND script_revision_id=? AND visual_revision_id=? AND prompt_hash=? AND status='succeeded' LIMIT 1`,
-  ).get(permit.videoId, permit.visualId, permit.planSnapshotId, permit.scriptRevisionId, permit.visualRevisionId, permit.promptHash);
+     AND script_revision_id=? AND plan_snapshot_hash=? AND script_content_hash=? AND prompt_hash=? AND status='succeeded' LIMIT 1`,
+  ).get(permit.videoId, permit.visualId, permit.planSnapshotId, permit.scriptRevisionId,
+    permit.planSnapshotHash, permit.scriptContentHash, permit.promptHash);
 }
 
 export function syncVideoImageStatus(database: DatabaseSync, videoId: string, now = Date.now()) {
@@ -116,9 +122,9 @@ export function enqueueVideoImageBatch(database: DatabaseSync, input: {
     database.prepare(
       `SELECT 1 FROM video_image_candidates
        WHERE video_id=? AND visual_id=? AND plan_snapshot_id=? AND script_revision_id=?
-         AND visual_revision_id=? AND prompt_hash=? AND status='failed' LIMIT 1`,
+         AND plan_snapshot_hash=? AND script_content_hash=? AND prompt_hash=? AND status='failed' LIMIT 1`,
     ).get(input.videoId, permit.visualId, permit.planSnapshotId, permit.scriptRevisionId,
-      permit.visualRevisionId, permit.promptHash));
+      permit.planSnapshotHash, permit.scriptContentHash, permit.promptHash));
   if (permits.length === 0) {
     const latest = getVideoImageBatch(database, input.projectId, input.videoId);
     if (latest) return { batch: latest, created: false };
@@ -247,10 +253,7 @@ export function listVideoImageCandidates(database: DatabaseSync, projectId: stri
   return (database.prepare("SELECT * FROM video_image_candidates WHERE project_id=? AND video_id=? ORDER BY created_at DESC,id DESC")
     .all(projectId, videoId) as unknown as CandidateRow[]).map((row) => {
       const permit = identities.get(row.visual_id);
-      return candidate(row, row.status === "succeeded" && !!permit && permit.planSnapshotId === row.plan_snapshot_id &&
-        permit.scriptRevisionId === row.script_revision_id && permit.visualRevisionId === row.visual_revision_id &&
-        permit.promptHash === row.prompt_hash && permit.planSnapshotHash === row.plan_snapshot_hash &&
-        permit.scriptContentHash === row.script_content_hash && permit.visualContentHash === row.visual_content_hash);
+      return candidate(row, row.status === "succeeded" && !!permit && candidateMatchesPermit(row, permit));
     });
 }
 
@@ -318,10 +321,7 @@ export function approveVideoImageCandidate(database: DatabaseSync, dataRoot: str
       throw new VideoImageError(409, "候选图文件已丢失或损坏，不能批准");
     }
     const current = candidate(row, true);
-    if (current.planSnapshotId !== permit.planSnapshotId || current.scriptRevisionId !== permit.scriptRevisionId ||
-        current.visualRevisionId !== permit.visualRevisionId || current.promptHash !== permit.promptHash ||
-        current.planSnapshotHash !== permit.planSnapshotHash || current.scriptContentHash !== permit.scriptContentHash ||
-        current.visualContentHash !== permit.visualContentHash) throw new VideoImageError(409, "历史候选不能批准为当前配图");
+    if (!candidateMatchesPermit(row, permit)) throw new VideoImageError(409, "历史候选不能批准为当前配图");
     const gateRevision = currentRevision + 1;
     database.prepare(
     `INSERT INTO video_image_approval_events (id,project_id,video_id,gate_revision,visual_id,candidate_id,
