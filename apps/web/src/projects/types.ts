@@ -109,6 +109,33 @@ export interface ProjectCreativeSettings {
   updatedAt: number;
 }
 
+export const ASPECT_RATIOS = ["9:16", "16:9"] as const;
+export type AspectRatio = typeof ASPECT_RATIOS[number];
+
+export interface VideoOutputProfile {
+  aspectRatio: AspectRatio;
+  orientation: "竖屏" | "横屏";
+  width: number;
+  height: number;
+}
+
+const VIDEO_OUTPUT_PROFILES: Record<AspectRatio, VideoOutputProfile> = {
+  "9:16": { aspectRatio: "9:16", orientation: "竖屏", width: 1080, height: 1920 },
+  "16:9": { aspectRatio: "16:9", orientation: "横屏", width: 1920, height: 1080 },
+};
+
+export function isAspectRatio(value: unknown): value is AspectRatio {
+  return typeof value === "string" && (ASPECT_RATIOS as readonly string[]).includes(value);
+}
+
+export function normalizeAspectRatio(value: unknown, fallback: AspectRatio = "9:16"): AspectRatio {
+  return isAspectRatio(value) ? value : fallback;
+}
+
+export function getVideoOutputProfile(aspectRatio: AspectRatio): VideoOutputProfile {
+  return VIDEO_OUTPUT_PROFILES[aspectRatio];
+}
+
 export type InputMode = "topic" | "body";
 export type VideoPlanEntryMode = "primary_input" | "douyin" | "zhihu";
 export type ReferenceRole = "style_only" | "content_source";
@@ -122,6 +149,7 @@ export interface VideoInputDraft {
   referenceRole: ReferenceRole;
   targetDurationSeconds: number;
   visualDensity: VisualDensity;
+  aspectRatio: AspectRatio;
   webEnabled: boolean;
   scriptInstructions: string;
   visualInstructions: string;

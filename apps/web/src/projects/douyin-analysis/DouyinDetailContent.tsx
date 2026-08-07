@@ -61,14 +61,59 @@ function CommentsDetails({ value }: { value: unknown }) {
   return <section aria-labelledby="douyin-comment-list"><div className="flex items-center justify-between gap-3"><h3 id="douyin-comment-list" className="text-sm font-semibold">评论样本</h3><span className="text-sm text-[var(--fg-secondary)]">本页 {comments.length} 条</span></div><p className="mt-2 text-sm text-[var(--fg-secondary)]">评论仅用于受众解读，不作为原视频事实。</p><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{comments.length ? comments.map((comment, index) => { const replies = items(comment.replies); return <article key={text(comment.id, String(index))} className="py-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-xs text-[var(--fg-secondary)]">匿名作者 {text(comment.authorId)}</span><span className="text-xs text-[var(--fg-secondary)]">{number(comment.likeCount)?.toLocaleString("zh-CN") ?? 0} 个赞</span></div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7">{text(comment.text, "该评论没有可展示文本。")}</p>{replies.length ? <div className="mt-3 border-l-2 border-[var(--border-subtle)] pl-4">{replies.map((reply, replyIndex) => <p key={text(reply.id, String(replyIndex))} className="py-1 text-sm leading-6 text-[var(--fg-secondary)]">回复：{text(reply.text)}</p>)}</div> : null}</article>; }) : <p className="py-4 text-sm text-[var(--fg-secondary)]">本页没有评论样本。</p>}</div></section>;
 }
 
+function ObservationList({ id, title, values }: { id: string; title: string; values: Item[] }) {
+  return <section aria-labelledby={id}><h3 id={id} className="text-sm font-semibold">{title}</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{values.map((observation, index) => <article key={`${text(observation.dimension)}-${index}`} className="py-4"><div className="flex flex-wrap gap-2"><Badge variant="outline">{label(observation.dimension ?? "综合")}</Badge><Badge variant="outline">{label(observation.nature ?? "observation")}</Badge><span className="text-xs text-[var(--fg-secondary)]">置信度：{label(observation.confidence)}</span></div><p className="mt-2 text-sm leading-7">{text(observation.conclusion)}</p>{Array.isArray(observation.evidenceRefs) && observation.evidenceRefs.length ? <p className="mt-2 break-words font-mono text-xs text-[var(--fg-secondary)]">证据：{observation.evidenceRefs.join("、")}</p> : null}</article>)}</div></section>;
+}
+
+function NarrativeSections({ value }: { value: unknown }) {
+  const sections = items(value);
+  if (!sections.length) return null;
+  return <section aria-labelledby="douyin-narrative-sections"><h3 id="douyin-narrative-sections" className="text-sm font-semibold">叙事结构</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{sections.map((section, index) => <article key={`${text(section.role, "section")}-${index}`} className="py-4"><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-xs text-[var(--fg-secondary)]">段落 {String(index + 1).padStart(2, "0")} · {duration(section.startMs)}–{duration(section.endMs)}</span><Badge variant="outline">{text(section.role, "叙事段落")}</Badge></div><p className="mt-2 text-sm leading-7">{text(section.summary)}</p><p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">表现手法：{text(section.technique)}</p>{Array.isArray(section.evidenceRefs) && section.evidenceRefs.length ? <p className="mt-2 break-words font-mono text-xs text-[var(--fg-secondary)]">证据：{section.evidenceRefs.join("、")}</p> : null}</article>)}</div></section>;
+}
+
+const METRIC_LABELS: Record<string, string> = {
+  totalCharacters: "转写字数", charactersPerMinute: "每分钟字数", first15SecondsCharacters: "前 15 秒字数",
+  videoDurationMs: "视频时长", topicFirstMs: "首个主题/钩子", firstValueDeliveryMs: "首次价值兑现",
+  firstTurnMs: "首次转折", ctaDurationMs: "行动号召时长",
+};
+
+function metricValue(key: string, value: unknown) {
+  const current = number(value);
+  if (current === null) return text(value);
+  if (key.endsWith("Ms")) return duration(current);
+  if (key.endsWith("Ratio")) return `${(current * 100).toFixed(1)}%`;
+  return current.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function MetricDetails({ value }: { value: unknown }) {
+  const metrics = item(value);
+  const entries = Object.entries(metrics);
+  if (!entries.length) return null;
+  return <section aria-labelledby="douyin-pacing-metrics"><h3 id="douyin-pacing-metrics" className="text-sm font-semibold">节奏指标</h3><Fields values={entries.map(([key, current]) => ({ label: METRIC_LABELS[key] ?? key, value: metricValue(key, current), mono: true }))} /></section>;
+}
+
 function ReportDetails({ value }: { value: unknown }) {
   const report = item(value); const evidence = item(report.evidence); const availability = item(report.availability);
+  const content = item(report.content); const narrative = item(report.narrative); const pacing = item(report.pacing);
+  const visual = item(report.visual); const audioSubtitle = item(report.audioSubtitle); const audience = item(report.audience);
+  const contentObservations = items(content.observations); const narrativeObservations = items(narrative.observations);
+  const pacingObservations = items(pacing.observations); const visualObservations = items(visual.observations);
+  const audioObservations = items(audioSubtitle.observations); const audienceObservations = items(audience.observations);
   const observations = items(report.observations); const risks = items(report.risks);
   return <div className="grid gap-6">
     <Fields values={[{ label: "报告完整性", value: label(evidence.completeness) }, { label: "ASR 字数", value: (number(evidence.asrTextCharacters) ?? 0).toLocaleString("zh-CN") }, { label: "成功关键帧", value: `${number(evidence.succeededFrames) ?? 0} 张` }, { label: "评论样本", value: `${number(evidence.commentCount) ?? 0} 条` }]} />
     <section aria-labelledby="douyin-availability"><h3 id="douyin-availability" className="text-sm font-semibold">分析维度可用性</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{Object.entries(availability).map(([key, raw]) => { const current = item(raw); return <div key={key} className="grid gap-2 py-3 sm:grid-cols-[10rem_auto_1fr] sm:items-start"><span className="font-medium">{label(key)}</span><Badge variant="outline">{label(current.status)}</Badge><span className="text-sm leading-6 text-[var(--fg-secondary)]">{text(current.reason)}</span></div>; })}</div></section>
-    <section aria-labelledby="douyin-observations"><h3 id="douyin-observations" className="text-sm font-semibold">综合观察</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{observations.length ? observations.map((observation, index) => <article key={`${text(observation.dimension)}-${index}`} className="py-4"><div className="flex flex-wrap gap-2"><Badge variant="outline">{label(observation.dimension ?? "综合")}</Badge><Badge variant="outline">{label(observation.nature ?? "observation")}</Badge><span className="text-xs text-[var(--fg-secondary)]">置信度：{label(observation.confidence)}</span></div><p className="mt-2 text-sm leading-7">{text(observation.conclusion)}</p><p className="mt-2 break-words font-mono text-xs text-[var(--fg-secondary)]">证据：{Array.isArray(observation.evidenceRefs) ? observation.evidenceRefs.join("、") : "—"}</p></article>) : <p className="py-4 text-sm text-[var(--fg-secondary)]">报告没有综合观察。</p>}</div></section>
-    {risks.length ? <section aria-labelledby="douyin-risks"><h3 id="douyin-risks" className="text-sm font-semibold">待核验风险</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{risks.map((risk, index) => <article key={`${text(risk.code)}-${index}`} className="py-4"><p className="font-mono text-xs text-[var(--warning)]">{text(risk.code)}</p><p className="mt-2 text-sm leading-7">{text(risk.summary)}</p></article>)}</div></section> : null}
+    {contentObservations.length ? <ObservationList id="douyin-content-observations" title="内容观察" values={contentObservations} /> : null}
+    <NarrativeSections value={narrative.sections} />
+    {narrativeObservations.length ? <ObservationList id="douyin-narrative-observations" title="叙事观察" values={narrativeObservations} /> : null}
+    <MetricDetails value={pacing.metrics} />
+    {pacingObservations.length ? <ObservationList id="douyin-pacing-observations" title="节奏观察" values={pacingObservations} /> : null}
+    {visualObservations.length ? <ObservationList id="douyin-visual-observations" title="画面观察" values={visualObservations} /> : null}
+    {audioObservations.length ? <ObservationList id="douyin-audio-observations" title="音频与字幕观察" values={audioObservations} /> : null}
+    {audienceObservations.length ? <><p className="text-sm text-[var(--fg-secondary)]">受众分析仅作为评论和互动信号的解释，不作为原视频事实。</p><ObservationList id="douyin-audience-observations" title="受众观察" values={audienceObservations} /></> : null}
+    {observations.length ? <ObservationList id="douyin-observations" title="综合观察" values={observations} /> : null}
+    {!contentObservations.length && !narrativeObservations.length && !pacingObservations.length && !visualObservations.length && !audioObservations.length && !audienceObservations.length && !observations.length && !items(narrative.sections).length ? <p role="status" className="text-sm text-[var(--fg-secondary)]">当前报告没有可展示的文字结论。</p> : null}
+    {risks.length ? <section aria-labelledby="douyin-risks"><h3 id="douyin-risks" className="text-sm font-semibold">待核验风险</h3><div className="mt-3 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{risks.map((risk, index) => <article key={`${text(risk.code)}-${index}`} className="py-4"><p className="font-mono text-xs text-[var(--warning)]">{text(risk.code)}</p><p className="mt-2 text-sm leading-7">{text(risk.summary)}</p>{Array.isArray(risk.evidenceRefs) && risk.evidenceRefs.length ? <p className="mt-2 break-words font-mono text-xs text-[var(--fg-secondary)]">证据：{risk.evidenceRefs.join("、")}</p> : null}</article>)}</div></section> : null}
   </div>;
 }
 

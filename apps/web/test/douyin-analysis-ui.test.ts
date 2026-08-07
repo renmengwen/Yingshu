@@ -56,6 +56,21 @@ test("五个摘要入口渲染各自的中文结构化详情而非统一 JSON", 
   assert.match(frames, /关键帧 01.*00:02/su);
   assert.match(comments, /评论样本.*评论正文.*回复正文/su);
   assert.match(report, /分析维度可用性.*节奏证据完整.*节奏清晰/su);
+  const dimensionalReport = render("report", {
+    evidence: { completeness: "complete", asrTextCharacters: 12, succeededFrames: 2, commentCount: 3 },
+    availability: { content: { status: "available", reason: "ASR 可用" } },
+    content: { observations: [{ dimension: "content", nature: "observation", confidence: "high", conclusion: "内容结论", evidenceRefs: ["asr-1"] }] },
+    narrative: { sections: [{ startMs: 0, endMs: 2_000, role: "开场", summary: "开场提出问题", technique: "问题钩子", evidenceRefs: ["asr-1"] }], observations: [] },
+    pacing: { metrics: { topicFirstMs: 2_000 }, observations: [{ dimension: "pacing", nature: "inference", confidence: "medium", conclusion: "节奏结论", evidenceRefs: ["asr-1"] }] },
+    visual: { observations: [{ dimension: "visualOverall", nature: "observation", confidence: "medium", conclusion: "画面结论", evidenceRefs: ["frame-0"] }] },
+    audioSubtitle: { observations: [{ dimension: "audioSubtitle", nature: "observation", confidence: "low", conclusion: "音频结论", evidenceRefs: ["asr-1"] }] },
+    audience: { interpretationOnly: true, observations: [{ dimension: "audience", nature: "inference", confidence: "medium", conclusion: "受众结论", evidenceRefs: ["comment-1"] }] },
+    observations: [], risks: [],
+  });
+  assert.match(dimensionalReport, /内容观察.*内容结论/su);
+  assert.match(dimensionalReport, /叙事结构.*开场提出问题.*问题钩子/su);
+  assert.match(dimensionalReport, /节奏指标.*首个主题\/钩子.*00:02/su);
+  assert.match(dimensionalReport, /画面观察.*画面结论.*音频与字幕观察.*音频结论.*受众观察.*受众结论/su);
   for (const html of [metadata, transcript, frames, comments, report]) assert.doesNotMatch(html, /<pre/u);
 });
 
