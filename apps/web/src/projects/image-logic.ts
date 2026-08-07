@@ -84,6 +84,12 @@ export function historicalImageCandidates(visual: VideoImageVisual) {
   return visual.candidates.filter((candidate) => !candidate.currentCompatible);
 }
 
+/** 图片文件自身的像素尺寸是候选预览的最终画幅事实，避免用旧的竖屏样式裁切横屏候选。 */
+export function imageCandidateAspectRatio(candidate: Pick<VideoImageCandidate, "width" | "height"> | null | undefined) {
+  if (!candidate || candidate.width <= 0 || candidate.height <= 0) return "9 / 16";
+  return `${candidate.width} / ${candidate.height}`;
+}
+
 export function imageBatchSummary(batch: VideoImageBatch | null) {
   if (!batch) return "尚未创建图片批次。";
   const status = ({ queued: "排队中", running: "生成中", succeeded: "已完成", failed: "生成失败", cancelled: "已中断", partial: "部分完成" } as const)[batch.status];

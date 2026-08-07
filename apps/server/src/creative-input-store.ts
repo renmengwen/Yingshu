@@ -6,6 +6,7 @@ import {
   type InputMode,
   parseCreativeInstructions,
   parseVideoInputDraft,
+  type OutputAspectRatio,
   type ReferenceRole,
   type VideoInputDraft,
   type VisualDensity,
@@ -36,6 +37,7 @@ interface VideoInputRow extends InstructionRow {
   reference_role: ReferenceRole;
   target_duration_seconds: number;
   visual_density: VisualDensity;
+  aspect_ratio: OutputAspectRatio;
   web_enabled: number;
 }
 
@@ -56,6 +58,7 @@ function videoInputResult(row: VideoInputRow): StoredVideoInputDraft {
     referenceRole: row.reference_role,
     targetDurationSeconds: row.target_duration_seconds,
     visualDensity: row.visual_density,
+    aspectRatio: row.aspect_ratio,
     webEnabled: row.web_enabled === 1,
     scriptInstructions: row.script_instructions,
     visualInstructions: row.visual_instructions,
@@ -89,7 +92,7 @@ export function getVideoInput(database: DatabaseSync, projectId: string, videoId
   const video = getVideo(database, projectId, videoId);
   return videoInputResult(database.prepare(
     `SELECT input_mode, topic, body, reference_text, reference_role, target_duration_seconds,
-            visual_density, web_enabled, script_instructions, visual_instructions, updated_at
+            visual_density, aspect_ratio, web_enabled, script_instructions, visual_instructions, updated_at
      FROM videos WHERE id = ? AND project_id = ?`,
   ).get(video.id, video.projectId) as unknown as VideoInputRow);
 }
@@ -115,10 +118,10 @@ export function putVideoInput(
   try {
     database.prepare(
       `UPDATE videos SET input_mode = ?, topic = ?, body = ?, reference_text = ?, reference_role = ?,
-         target_duration_seconds = ?, visual_density = ?, web_enabled = ?, script_instructions = ?,
-         visual_instructions = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
+         target_duration_seconds = ?, visual_density = ?, aspect_ratio = ?, web_enabled = ?,
+         script_instructions = ?, visual_instructions = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
     ).run(draft.inputMode, draft.topic, draft.body, draft.referenceText, draft.referenceRole,
-      draft.targetDurationSeconds, draft.visualDensity, draft.webEnabled ? 1 : 0,
+      draft.targetDurationSeconds, draft.visualDensity, draft.aspectRatio, draft.webEnabled ? 1 : 0,
       draft.scriptInstructions, draft.visualInstructions, updatedAt, video.id, video.projectId);
     if (generationInputChanged) {
       // 只有真实生成输入变化才失效已冻结方案；完全相同的重复保存保持批准有效。

@@ -11,8 +11,8 @@ import { scriptApprovalEventId } from "./script-approval-store.js";
 import { validateStoredScriptVersion } from "./script-version-store.js";
 
 export const PROJECT_PACKAGE_VERSION = "narralume-project-package-v1" as const;
-export const RESTORABLE_PROJECT_SCHEMA_VERSIONS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27] as const;
-const CURRENT_SCHEMA_VERSION = 27;
+export const RESTORABLE_PROJECT_SCHEMA_VERSIONS = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28] as const;
+const CURRENT_SCHEMA_VERSION = 28;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 10_000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024;
@@ -240,7 +240,7 @@ function parseFinalManifest(text: string): FinalVideoManifest {
       !HASH.test(chunk.fileHash) || !Number.isSafeInteger(chunk.bytes) || chunk.bytes < 1 ||
       !Number.isSafeInteger(chunk.durationMs) || chunk.durationMs < 1) || complete.finalVideo.bytes < 1 ||
       !Number.isSafeInteger(complete.finalVideo.durationMs) || complete.finalVideo.durationMs < 1 ||
-      complete.finalVideo.streams?.video !== "h264:1080x1920:25:yuv420p" || complete.finalVideo.streams?.audio !== "aac") {
+      complete.finalVideo.streams?.video !== RENDER_CONTRACT.video || complete.finalVideo.streams?.audio !== "aac") {
     throw new Error("最终视频清单文件身份无效");
   }
   const identity = {

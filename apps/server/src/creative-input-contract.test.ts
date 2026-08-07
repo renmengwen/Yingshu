@@ -26,6 +26,7 @@ function validInput() {
 
 test("视频输入规范化时保留非当前模式草稿和段落", () => {
   const parsed = parseVideoInputDraft(validInput());
+  assert.equal(parsed.aspectRatio, "9:16");
   assert.equal(parsed.topic, "为什么 银票不容易伪造");
   assert.equal(parsed.body, "保留第一段\n\n保留第二段");
   assert.equal(parsed.referenceText, "参考\n文字");
@@ -33,13 +34,15 @@ test("视频输入规范化时保留非当前模式草稿和段落", () => {
 
   const body = parseVideoInputDraft({ ...validInput(), inputMode: "body", topic: "仍保留主题" });
   assert.equal(body.topic, "仍保留主题");
+  assert.equal(parseVideoInputDraft({ ...validInput(), aspectRatio: "16:9" }).aspectRatio, "16:9");
 });
 
 test("视频输入严格拒绝字段漂移、错误类型、超限和缺少当前主输入", () => {
   assert.throws(() => parseVideoInputDraft({ ...validInput(), extra: true }), /字段不完整或包含未支持字段/u);
   assert.throws(() => parseVideoInputDraft({ ...validInput(), webEnabled: 1 }), /必须是布尔值/u);
-  assert.throws(() => parseVideoInputDraft({ ...validInput(), targetDurationSeconds: 60.5 }), /60～600 秒的整数/u);
+  assert.throws(() => parseVideoInputDraft({ ...validInput(), targetDurationSeconds: 60.5 }), /目标时长必须是 60 到 600 秒的整数/u);
   assert.throws(() => parseVideoInputDraft({ ...validInput(), referenceRole: "facts" }), /参考文本角色无效/u);
+  assert.throws(() => parseVideoInputDraft({ ...validInput(), aspectRatio: "1:1" }), /画幅比例无效/u);
   assert.throws(() => parseVideoInputDraft({ ...validInput(), topic: "" }), /请输入主题/u);
   assert.throws(() => parseVideoInputDraft({ ...validInput(), inputMode: "body", body: "" }), /请粘贴正文/u);
   assert.throws(() => parseVideoInputDraft({

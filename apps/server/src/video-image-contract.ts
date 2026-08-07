@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 
 import type { OpenAiImageConfig } from "./image-provider.js";
+import { getImageOutputProfile, parseAspectRatio, type AspectRatio } from "./video-output-profile.js";
 
 export const VIDEO_IMAGE_JOB_TYPE = "video_image_generate";
-export const VIDEO_IMAGE_SIZE = "1600x2848";
-export const VIDEO_IMAGE_CANDIDATES_PER_VISUAL = 1;
 export const VIDEO_IMAGE_ID = /^[A-Za-z0-9_-]+$/u;
 
 export type VideoImageBatchMode = "missing" | "single" | "retry_failed" | "regenerate";
@@ -17,6 +16,7 @@ export class VideoImageError extends Error {
 export interface VideoImagePermit {
   projectId: string;
   videoId: string;
+  aspectRatio: AspectRatio;
   planSnapshotId: string;
   planSnapshotHash: string;
   scriptRevisionId: string;
@@ -30,12 +30,18 @@ export interface VideoImagePermit {
   promptHash: string;
 }
 
+export interface VideoImageParameters {
+  aspectRatio: AspectRatio;
+  size: string;
+  candidates: 1;
+}
+
 export interface VideoImageJobPayload extends VideoImagePermit {
   batchId: string;
   requestIdentity: string;
   providerId: string;
   model: string;
-  parameters: { size: typeof VIDEO_IMAGE_SIZE; candidates: 1 };
+  parameters: VideoImageParameters;
   attempt: number;
 }
 
@@ -44,6 +50,11 @@ export type ResolveVideoImageProvider = (
 ) => Promise<OpenAiImageConfig | null>;
 
 export const videoImageSha256 = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
+
+export function videoImageParameters(aspectRatio: unknown): VideoImageParameters {
+  const normalized = parseAspectRatio(aspectRatio);
+  return { aspectRatio: normalized, size: getImageOutputProfile(normalized).size, candidates: 1 };
+}
 
 export function videoImageText(value: unknown, label: string, maximum = 255) {
   if (typeof value !== "string") throw new VideoImageError(422, `${label}无效`);
@@ -66,7 +77,7 @@ export function videoImageRequestIdentity(
 ) {
   return videoImageSha256(JSON.stringify({
     contract: "video-image-request-v1",
-    projectId: permit.projectId, videoId: permit.videoId,
+    projectId: permit.projectId, videoId: permit.videoId, aspectRatio: permit.aspectRatio,
     planSnapshotId: permit.planSnapshotId, planSnapshotHash: permit.planSnapshotHash,
     scriptRevisionId: permit.scriptRevisionId, scriptContentHash: permit.scriptContentHash,
     visualRevisionId: permit.visualRevisionId, visualContentHash: permit.visualContentHash,
@@ -74,7 +85,7 @@ export function videoImageRequestIdentity(
     styleSnapshot: permit.styleSnapshot, promptHash: permit.promptHash,
     providerId,
     model,
-    parameters: { size: VIDEO_IMAGE_SIZE, candidates: VIDEO_IMAGE_CANDIDATES_PER_VISUAL },
+    parameters: videoImageParameters(permit.aspectRatio),
     idempotencyKey,
   }));
 }

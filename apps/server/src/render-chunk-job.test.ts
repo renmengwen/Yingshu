@@ -10,8 +10,10 @@ import { createJob, getJob, requestJobCancellation } from "./job-store.js";
 import { JobWorker } from "./job-worker.js";
 import { createRenderChunksJobHandler, planRenderChunks, renderChunkIdentity, RENDER_CHUNKS_JOB_TYPE, writeSnapshot } from "./render-chunk-job.js";
 import type { VisualSegmentRecord } from "./visual-segment-store.js";
+import { getVideoOutputProfile } from "./video-output-profile.js";
 
 const HASH = "a".repeat(64);
+const PROFILE = getVideoOutputProfile("9:16");
 
 function segment(index: number, startMs: number, endMs: number): VisualSegmentRecord {
   return {
@@ -37,9 +39,9 @@ test("分片身份包含生产输入且不受路径、时间或机器版本影�
   const candidates = new Map([["candidate_0", { candidate_id: "candidate_0", review_revision: 1, file_hash: "b".repeat(64) }]]);
   const audio = [{ segment_index: 0, input_hash: "c".repeat(64), relative_path: "任意路径", file_hash: "d".repeat(64), bytes: 9, duration_ms: 60_000 }];
   const first = renderChunkIdentity({ episodeId: "episode", scriptVersionId: "script", approvalRevision: 1,
-    timelineHash: HASH, chunk, candidates, audio, assHash: "e".repeat(64) });
+    timelineHash: HASH, profile: PROFILE, chunk, candidates, audio, assHash: "e".repeat(64) });
   const second = renderChunkIdentity({ episodeId: "episode", scriptVersionId: "script", approvalRevision: 1,
-    timelineHash: HASH, chunk, candidates, audio: [{ ...audio[0]!, relative_path: "另一绝对路径", bytes: 999 }], assHash: "e".repeat(64) });
+    timelineHash: HASH, profile: PROFILE, chunk, candidates, audio: [{ ...audio[0]!, relative_path: "另一绝对路径", bytes: 999 }], assHash: "e".repeat(64) });
   assert.equal(first.renderHash, second.renderHash);
   const json = JSON.stringify(first.identity);
   for (const forbidden of ["relative_path", "generatedAt", "mtime", "randomUUID", "ffmpegVersion"]) {
@@ -57,7 +59,7 @@ test("局部视觉身份变化只使所属分片失效", () => {
   }] as const)));
   const identity = (chunk: typeof plans[number], map = candidates) => renderChunkIdentity({
     episodeId: "episode", scriptVersionId: "script", approvalRevision: 1, timelineHash: HASH, chunk,
-    candidates: map,
+    profile: PROFILE, candidates: map,
     audio: chunk.segments.map((_, index) => ({ segment_index: index, input_hash: "c".repeat(64),
       relative_path: "ignored", file_hash: "d".repeat(64), bytes: 1, duration_ms: 60_000 })),
     assHash: "e".repeat(64),

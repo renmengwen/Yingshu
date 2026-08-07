@@ -3,7 +3,9 @@ import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 
-export const IMAGE_GENERATION_SIZE = "1600x2848";
+import { getImageOutputProfile, type AspectRatio } from "./video-output-profile.js";
+
+export const IMAGE_GENERATION_SIZE = getImageOutputProfile("9:16").size;
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const MAX_GENERATION_RESPONSE_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 1024 * 1024;
 
@@ -37,6 +39,8 @@ export interface GenerateImageInput {
   prompt: string;
   negativePrompt?: string;
   config: OpenAiImageConfig;
+  aspectRatio?: AspectRatio;
+  size?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   lookupImpl?: typeof lookup;
@@ -206,6 +210,7 @@ export async function generateOpenAiImage(input: GenerateImageInput): Promise<Ge
   const fetchImpl = input.fetchImpl ?? fetch;
   const lookupImpl = input.lookupImpl ?? lookup;
   const requestImpl = input.requestImpl ?? boundRequest;
+  const size = input.size?.trim() || IMAGE_GENERATION_SIZE;
   let endpoint: URL;
   try { endpoint = new URL("images/generations", `${baseUrl.replace(/\/+$/, "")}/`); }
   catch { throw new Error("图片模型地址无效"); }
@@ -216,7 +221,7 @@ export async function generateOpenAiImage(input: GenerateImageInput): Promise<Ge
     response = await fetchImpl(endpoint, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ model, prompt, size: IMAGE_GENERATION_SIZE, watermark: false, response_format: "url" }),
+      body: JSON.stringify({ model, prompt, size, watermark: false, response_format: "url" }),
       signal: input.signal,
       redirect: "error",
     });

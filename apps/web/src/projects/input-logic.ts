@@ -1,4 +1,10 @@
-import type { ProjectCreativeSettings, VideoInputDraft } from "./types";
+import {
+  getVideoOutputProfile,
+  isAspectRatio,
+  normalizeAspectRatio,
+  type ProjectCreativeSettings,
+  type VideoInputDraft,
+} from "./types";
 
 export const INPUT_LIMITS = {
   topicCodePoints: 200,
@@ -34,6 +40,9 @@ export function validateVideoInput(input: VideoInputDraft, options: { allowEmpty
   if (input.referenceRole !== "style_only" && input.referenceRole !== "content_source") throw new Error("参考文本角色无效，请重新选择");
   if (!(["relaxed", "standard", "compact"] as const).includes(input.visualDensity)) throw new Error("画面密度无效，请重新选择");
   if (typeof input.webEnabled !== "boolean") throw new Error("联网设置无效，请重新选择");
+  if (!isAspectRatio(input.aspectRatio)) throw new Error("输出画幅无效，请重新选择");
+  const aspectRatio = normalizeAspectRatio(input.aspectRatio);
+  const profile = getVideoOutputProfile(aspectRatio);
   if (!Number.isSafeInteger(input.targetDurationSeconds) || input.targetDurationSeconds < 60 || input.targetDurationSeconds > 600) {
     throw new Error("目标时长必须是60～600秒的整数");
   }
@@ -55,6 +64,7 @@ export function validateVideoInput(input: VideoInputDraft, options: { allowEmpty
     referenceRole: input.referenceRole,
     targetDurationSeconds: input.targetDurationSeconds,
     visualDensity: input.visualDensity,
+    aspectRatio: profile.aspectRatio,
     webEnabled: input.webEnabled,
     scriptInstructions: validateInstructions(input.scriptInstructions, "当前视频文案补充"),
     visualInstructions: validateInstructions(input.visualInstructions, "当前视频画面补充"),

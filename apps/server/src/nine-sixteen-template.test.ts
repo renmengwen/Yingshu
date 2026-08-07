@@ -46,6 +46,9 @@ test("9:16 模板覆盖五类运镜、编码参数与安全边界", async () => 
     assert.match(filter, /1\+0\.100000\*\(on\/49\)/);
     assert.match(filter, /1\+0\.100000\*\(1-on\/49\)/);
     assert.match(filter, /concat=n=5:v=1:a=0\[visual\];\[visual\]ass=timeline\.ass/);
+    const landscapeArgs = buildNineSixteenFfmpegArgs({ ...input, aspectRatio: "16:9" });
+    const landscapeFilter = landscapeArgs[landscapeArgs.indexOf("-filter_complex") + 1]!;
+    assert.match(landscapeFilter, /scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080/);
     assert.deepEqual(args.slice(-14), [
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-r", "25",
       "-c:a", "aac", "-shortest", "-movflags", "+faststart", outputPath,

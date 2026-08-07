@@ -5,7 +5,7 @@ import { generateOpenAiImage, type GenerateImageInput, type OpenAiImageConfig } 
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { requestJobCancellation } from "./job-store.js";
 import { withDataFileMutationLock } from "./data-file-mutation-lock.js";
-import { type VideoImageJobPayload, VIDEO_IMAGE_JOB_TYPE, videoImageRequestIdentity } from "./video-image-contract.js";
+import { type VideoImageJobPayload, VIDEO_IMAGE_JOB_TYPE, videoImageParameters, videoImageRequestIdentity } from "./video-image-contract.js";
 import { cleanupUnreferencedVideoImageFiles, insertVideoImageCandidate, insertVideoImageFailure, permitStillCurrent, syncVideoImageStatus } from "./video-image-store.js";
 
 interface Dependencies {
@@ -17,10 +17,13 @@ interface Dependencies {
 function payload(value: unknown): VideoImageJobPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("图片任务冻结参数无效");
   const task = value as VideoImageJobPayload;
+  const imageParameters = videoImageParameters(task.parameters?.aspectRatio);
   if (!task.projectId || !task.videoId || !task.visualId || !task.batchId || !task.requestIdentity ||
-      !task.providerId || !task.model || !task.prompt || task.parameters?.size !== "1600x2848" ||
-      task.parameters?.candidates !== 1 || task.attempt !== 1) throw new Error("图片任务冻结参数无效");
-  return task;
+      !task.providerId || !task.model || !task.prompt || task.parameters?.size !== imageParameters.size ||
+      task.aspectRatio !== imageParameters.aspectRatio || task.parameters?.candidates !== 1 || task.attempt !== 1) {
+    throw new Error("图片任务冻结参数无效");
+  }
+  return { ...task, parameters: imageParameters };
 }
 
 async function* bytes(value: Uint8Array) { yield value; }
@@ -51,6 +54,7 @@ export function createVideoImageJobHandler(
   const timeoutMs = dependencies.timeoutMs ?? 120_000;
   return async (context: JobExecutionContext) => {
     const task = payload(context.job.payload);
+    const imageParameters = videoImageParameters(task.parameters.aspectRatio);
     const batch = database.prepare("SELECT idempotency_key FROM video_image_batches WHERE id=? AND project_id=? AND video_id=?")
       .get(task.batchId, task.projectId, task.videoId) as { idempotency_key: string } | undefined;
     if (context.job.type !== VIDEO_IMAGE_JOB_TYPE || context.job.id !== `job_video_image_${task.requestIdentity}`) {
@@ -96,7 +100,8 @@ export function createVideoImageJobHandler(
       let generated: Awaited<ReturnType<typeof generate>> | undefined;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          generated = await generate({ prompt: task.prompt, negativePrompt: task.negativePrompt, config, signal: controller.signal });
+          generated = await generate({ prompt: task.prompt, negativePrompt: task.negativePrompt, config,
+            aspectRatio: imageParameters.aspectRatio, size: imageParameters.size, signal: controller.signal });
           break;
         } catch (error) {
           if (controller.signal.aborted || context.isCancellationRequested()) throw new JobCancelledError();
@@ -115,7 +120,7 @@ export function createVideoImageJobHandler(
           source: {
             kind: "generation", episodeId: task.videoId, scriptVersionId: task.scriptRevisionId,
             approvalRevision: 1, provider: task.providerId, model: task.model, promptHash: task.promptHash,
-            requestHash: task.requestIdentity, size: task.parameters.size, outputIndex: 0,
+            requestHash: task.requestIdentity, size: imageParameters.size, outputIndex: 0,
             ...(generated.revisedPrompt ? { revisedPrompt: generated.revisedPrompt } : {}),
           },
           raw: bytes(generated.bytes), signal: controller.signal,

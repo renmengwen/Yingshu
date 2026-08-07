@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 
+import { getVideoOutputProfile, type AspectRatio, type VideoOutputProfile } from "./video-output-profile.js";
 import { JobCancelledError } from "./job-worker.js";
 
 const MAX_PROCESS_OUTPUT = 64 * 1024;
@@ -9,6 +10,8 @@ export interface VideoProbe {
   bytes: number;
   durationMs: number;
 }
+
+export type VideoOutputProbeProfile = VideoOutputProfile;
 
 export async function runVideoProcess(
   command: string,
@@ -35,7 +38,7 @@ export async function runVideoProcess(
     if (stderrBytes > MAX_PROCESS_OUTPUT) { overflow = true; child.kill(); return; }
     stderr.push(chunk);
   });
-  // Windows 在取消恰逢 pipe 建立/关闭时可能由 stdio Socket 抛 ENOTCONN；必须收敛到本次子进程结果，不能成为进程级未处理错误。
+  // Windows 在取消 pipe 建立/关闭时可能由 stdio Socket 抛 ENOTCONN；必须收敛到本次子进程结果。
   child.stdout.on("error", (error) => { childError ??= error; });
   child.stderr.on("error", (error) => { childError ??= error; });
   child.once("error", (error) => { childError = error; });
@@ -50,8 +53,9 @@ export async function runVideoProcess(
   return Buffer.concat(stdout).toString("utf8");
 }
 
-export async function probeNineSixteenVideo(
+export async function probeVideoOutputVideo(
   path: string,
+  profile: VideoOutputProbeProfile,
   signal?: AbortSignal,
   run: typeof runVideoProcess = runVideoProcess,
 ): Promise<VideoProbe> {
@@ -81,9 +85,17 @@ export async function probeNineSixteenVideo(
   const audioStream = audio[0];
   if (video.length !== 1 || audio.length !== 1 || !stream || !audioStream ||
       stream.codec_name !== "h264" || stream.pix_fmt !== "yuv420p" || audioStream.codec_name !== "aac" ||
-      stream.width !== 1080 || stream.height !== 1920 || stream.r_frame_rate !== "25/1" ||
+      stream.width !== profile.width || stream.height !== profile.height || stream.r_frame_rate !== "25/1" ||
       !Number.isSafeInteger(durationMs) || durationMs < 1 || Number(parsed.format?.size) !== info.size || info.size < 1) {
     throw new Error("视频流、尺寸、帧率、大小或时长无效");
   }
   return { bytes: info.size, durationMs };
+}
+
+export async function probeNineSixteenVideo(
+  path: string,
+  signal?: AbortSignal,
+  run: typeof runVideoProcess = runVideoProcess,
+) {
+  return probeVideoOutputVideo(path, getVideoOutputProfile("9:16"), signal, run);
 }

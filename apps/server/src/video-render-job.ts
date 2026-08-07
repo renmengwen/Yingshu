@@ -4,14 +4,15 @@ import { copyFile, lstat, open, realpath, rename, rm, stat, writeFile } from "no
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { probeNineSixteenVideo, runVideoProcess } from "./ffmpeg-video.js";
+import { probeVideoOutputVideo, runVideoProcess } from "./ffmpeg-video.js";
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { renderNineSixteenTemplate, type NineSixteenMotionKind } from "./nine-sixteen-template.js";
 import { ensureSafeOutputDirectory } from "./render-chunk-job.js";
 import { renderAss } from "./subtitle-timeline.js";
 import { canonical } from "./video-plan-contract.js";
+import { type VideoOutputProbeProfile } from "./ffmpeg-video.js";
 import {
-  VIDEO_RENDER_PARAMS, videoRenderIdentity, VideoRenderError, videoRenderSha256,
+  videoRenderIdentity, VideoRenderError, videoRenderSha256, videoRenderParams,
 } from "./video-render-store.js";
 
 const MAX_INPUT_BYTES = 256 * 1024 * 1024;
@@ -140,10 +141,15 @@ function cues(database: DatabaseSync, run: RunRow, segment: SegmentRow) {
     endMs: Math.min(cue.endMs, segment.end_ms) })).filter((cue) => cue.endMs > cue.startMs);
 }
 
-async function verifiedChunk(path: string, row: ChunkRow, expectedDurationMs: number) {
+async function verifiedChunk(
+  path: string,
+  row: ChunkRow,
+  expectedDurationMs: number,
+  profile: VideoOutputProbeProfile,
+) {
   if (!row.relative_path || !row.bytes || !row.file_hash || row.relative_path.length < 1) return false;
   try {
-    const measured = await probeNineSixteenVideo(path);
+    const measured = await probeVideoOutputVideo(path, profile);
     return measured.bytes === row.bytes && Math.abs(measured.durationMs - expectedDurationMs) <= MAX_DURATION_DRIFT_MS &&
       await sha256File(path) === row.file_hash;
   } catch { return false; }
@@ -151,9 +157,10 @@ async function verifiedChunk(path: string, row: ChunkRow, expectedDurationMs: nu
 
 async function renderChunk(database: DatabaseSync, dataRoot: string, context: JobExecutionContext,
   input: Payload, run: RunRow, segment: SegmentRow, source: ArtifactRow, audio: Buffer) {
+  const params = videoRenderParams(database, input.projectId, input.videoId);
   const identityHash = videoRenderSha256(canonical({ videoId: input.videoId,
     stableSegmentHash: segment.segment_hash, audioHash: source.audio_hash, assHash: source.ass_hash,
-    params: VIDEO_RENDER_PARAMS }));
+    params }));
   const relativePath = `videos/${input.videoId}/renders/chunks/${identityHash.slice(0, 2)}/${identityHash}.mp4`;
   const outputPath = controlled(dataRoot, relativePath);
   await ensureSafeOutputDirectory(dataRoot, dirname(outputPath));
@@ -164,7 +171,7 @@ async function renderChunk(database: DatabaseSync, dataRoot: string, context: Jo
     const reusable = database.prepare(
       "SELECT * FROM video_render_chunks WHERE identity_hash=? AND status='succeeded' ORDER BY checkpoint_at DESC LIMIT 1",
     ).get(identityHash) as unknown as ChunkRow | undefined;
-    if (reusable?.relative_path === relativePath && await verifiedChunk(outputPath, reusable, segment.end_ms - segment.start_ms)) {
+    if (reusable?.relative_path === relativePath && await verifiedChunk(outputPath, reusable, segment.end_ms - segment.start_ms, params)) {
       context.commitCheckpoint("video-render-chunk", String(segment.segment_index), identityHash, (transaction) => {
         currentRun(database, input);
         transaction.run(
@@ -191,7 +198,7 @@ async function renderChunk(database: DatabaseSync, dataRoot: string, context: Jo
       .get(run.id, identityHash) as unknown as ChunkRow;
   }
   if (row.relative_path && row.relative_path !== relativePath) throw new Error("渲染分片不是规范内容寻址路径");
-  if (row.status === "succeeded" && await verifiedChunk(outputPath, row, segment.end_ms - segment.start_ms)) {
+  if (row.status === "succeeded" && await verifiedChunk(outputPath, row, segment.end_ms - segment.start_ms, params)) {
     return { row, reused: true };
   }
   await rm(outputPath, { force: true });
@@ -216,15 +223,16 @@ async function renderChunk(database: DatabaseSync, dataRoot: string, context: Jo
     }
     await writeFile(imagePath, await verifiedContent(dataRoot, candidate.relative_path, candidate.bytes, candidate.file_hash), { flag: "wx" });
     await writeFile(sourceAudio, audio, { flag: "wx" });
-    await writeFile(assPath, renderAss(cues(database, run, segment), segment.start_ms), { flag: "wx" });
+    await writeFile(assPath, renderAss(cues(database, run, segment), segment.start_ms, params), { flag: "wx" });
     await runVideoProcess("ffmpeg", ["-v", "error", "-y", "-ss", (segment.start_ms / 1000).toFixed(3),
       "-t", ((segment.end_ms - segment.start_ms) / 1000).toFixed(3), "-i", sourceAudio, "-c:a", "pcm_s16le", localAudio],
     { signal: controller.signal });
-    await renderNineSixteenTemplate({ scenes: [{ imagePath, durationMs: segment.end_ms - segment.start_ms,
+      await renderNineSixteenTemplate({ scenes: [{ imagePath, durationMs: segment.end_ms - segment.start_ms,
       motionKind: motion(segment.motion_kind), motionAmountPpm: segment.motion_amount_ppm,
-      fadeMs: segment.fade_in_ms }], audioPath: localAudio, assPath, outputPath, signal: controller.signal });
+      fadeMs: segment.fade_in_ms }], audioPath: localAudio, assPath, outputPath,
+      aspectRatio: params.aspectRatio, signal: controller.signal });
     context.throwIfCancellationRequested();
-    const measured = await probeNineSixteenVideo(outputPath, controller.signal);
+    const measured = await probeVideoOutputVideo(outputPath, params, controller.signal);
     if (Math.abs(measured.durationMs - (segment.end_ms - segment.start_ms)) > MAX_DURATION_DRIFT_MS) {
       throw new Error("渲染分片时长与视觉段不一致");
     }
@@ -236,7 +244,7 @@ async function renderChunk(database: DatabaseSync, dataRoot: string, context: Jo
       transaction.run(
         `UPDATE video_render_chunks SET status='succeeded',relative_path=?,bytes=?,file_hash=?,media_info_json=?,
          error_summary=NULL,checkpoint_at=?,updated_at=? WHERE id=? AND identity_hash=?`,
-        relativePath, measured.bytes, fileHash, canonical({ ...VIDEO_RENDER_PARAMS, durationMs: measured.durationMs }),
+        relativePath, measured.bytes, fileHash, canonical({ ...params, durationMs: measured.durationMs }),
         Date.now(), Date.now(), row!.id, identityHash);
       return undefined;
     });
@@ -258,6 +266,7 @@ async function composeFinal(database: DatabaseSync, dataRoot: string, context: J
   const finalRelativePath = `${directory}/video.mp4`;
   const manifestRelativePath = `${directory}/manifest.json`;
   const finalPath = controlled(dataRoot, finalRelativePath);
+  const params = videoRenderParams(database, input.projectId, input.videoId);
   await ensureSafeOutputDirectory(dataRoot, dirname(finalPath));
   const staging = join(dirname(finalPath), `.staging-${randomUUID()}`);
   await ensureSafeOutputDirectory(dataRoot, staging);
@@ -276,7 +285,7 @@ async function composeFinal(database: DatabaseSync, dataRoot: string, context: J
       if (chunk.relative_path !== expectedPath) throw new Error("最终合并分片不是规范内容寻址路径");
       const source = controlled(dataRoot, expectedPath);
       const segment = segments[chunk.chunk_index]!;
-      if (!await verifiedChunk(source, chunk, segment.end_ms - segment.start_ms)) {
+      if (!await verifiedChunk(source, chunk, segment.end_ms - segment.start_ms, params)) {
         throw new Error("最终合并前分片媒体校验失败");
       }
       const local = `chunk-${String(chunk.chunk_index).padStart(4, "0")}.mp4`;
@@ -293,7 +302,7 @@ async function composeFinal(database: DatabaseSync, dataRoot: string, context: J
       "-c:v", "libx264", "-r", "25", "-pix_fmt", "yuv420p", "-c:a", "aac",
       "-movflags", "+faststart", basename(stagedVideo)], { cwd: staging, signal: controller.signal });
     context.throwIfCancellationRequested();
-    const measured = await probeNineSixteenVideo(stagedVideo, controller.signal);
+    const measured = await probeVideoOutputVideo(stagedVideo, params, controller.signal);
     const expectedDuration = segments.at(-1)!.end_ms;
     if (Math.abs(measured.durationMs - expectedDuration) > MAX_DURATION_DRIFT_MS) throw new Error("最终视频时长与真实音频不一致");
     // metadata 成功不代表码流可完整读取，最终产物必须实际解码到 null sink。
@@ -321,11 +330,11 @@ async function composeFinal(database: DatabaseSync, dataRoot: string, context: J
       audio: { snapshotId: timeline.tts_snapshot_id, snapshotHash: tts.snapshot_hash, artifactId: timeline.tts_artifact_id,
         providerId: tts.provider_id, modelId: tts.model_id, voiceId: tts.voice_id, rate: tts.rate, language: tts.language,
         audioHash: timeline.audio_hash, cuesHash: timeline.cues_hash, srtHash: timeline.srt_hash, assHash: timeline.ass_hash },
-      render: { identityHash: input.identityHash, params: VIDEO_RENDER_PARAMS,
+      render: { identityHash: input.identityHash, params,
         chunks: chunks.map((chunk) => ({ index: chunk.chunk_index, identityHash: chunk.identity_hash,
           fileHash: chunk.file_hash, bytes: chunk.bytes })) },
       final: { identityHash: finalIdentity, relativePath: finalRelativePath, bytes: measured.bytes,
-        fileHash, mediaInfo: { ...VIDEO_RENDER_PARAMS, durationMs: measured.durationMs } },
+        fileHash, mediaInfo: { ...params, durationMs: measured.durationMs } },
       ffmpegVersion, createdAt: run.created_at,
     };
     const manifestText = `${canonical(manifest)}\n`;
@@ -346,7 +355,7 @@ async function composeFinal(database: DatabaseSync, dataRoot: string, context: J
           manifest_relative_path,manifest_bytes,manifest_hash,ffmpeg_version,created_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         `vfv_${randomUUID()}`, run.id, input.projectId, input.videoId, finalIdentity, finalRelativePath, measured.bytes,
-        fileHash, canonical({ ...VIDEO_RENDER_PARAMS, durationMs: measured.durationMs }), manifestRelativePath,
+        fileHash, canonical({ ...params, durationMs: measured.durationMs }), manifestRelativePath,
         Buffer.byteLength(manifestText), manifestHash, ffmpegVersion, Date.now());
       transaction.run("UPDATE video_render_runs SET status='succeeded',error_summary=NULL,updated_at=? WHERE id=? AND identity_hash=?",
         Date.now(), run.id, input.identityHash);

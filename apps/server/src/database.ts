@@ -1720,6 +1720,12 @@ const MIGRATION_27 = `
   BEGIN SELECT RAISE(ABORT, 'zhihu analysis selection events are append-only'); END;
 `;
 
+
+const MIGRATION_28 = `
+  ALTER TABLE videos ADD COLUMN aspect_ratio TEXT NOT NULL DEFAULT '9:16'
+    CHECK (aspect_ratio IN ('9:16', '16:9'));
+`;
+
 const MIGRATIONS = [
   MIGRATION_1, MIGRATION_2, MIGRATION_3, MIGRATION_4, MIGRATION_5, MIGRATION_6, MIGRATION_7, MIGRATION_8,
   MIGRATION_9,
@@ -1741,6 +1747,7 @@ const MIGRATIONS = [
   MIGRATION_25,
   MIGRATION_26,
   MIGRATION_27,
+  MIGRATION_28,
 ];
 
 export interface YingshuDatabase {

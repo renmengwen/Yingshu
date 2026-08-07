@@ -156,6 +156,13 @@ export interface VideoInputDraft {
   updatedAt: number;
 }
 
+export function normalizeVideoInputDraft(input: Omit<VideoInputDraft, "updatedAt"> & { updatedAt: number; aspectRatio?: unknown }): VideoInputDraft {
+  return {
+    ...input,
+    aspectRatio: normalizeAspectRatio(input.aspectRatio),
+  };
+}
+
 export interface PageCommonProps {
   navigate: (path: string) => void;
   onOpenSettings: () => void;

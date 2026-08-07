@@ -4,6 +4,7 @@ import type { ChapterTextModelConfig } from "./chapter-event-analyzer.js";
 import type { getGlobalPromptSettings, getProjectSettings, getVideoInput } from "./creative-input-store.js";
 import type { FrozenDouyinPlanInput } from "./douyin-plan-whitelist.js";
 import type { FrozenZhihuPlanInput } from "./zhihu-plan-whitelist.js";
+import { getVideoOutputProfile } from "./video-output-profile.js";
 
 export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
 export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
@@ -256,7 +257,7 @@ export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonl
   const { douyin = null, zhihu = null, ...creativeInput } = snapshot.input;
   const external = douyin ?? zhihu;
   const currentOperation = external?.usageRole === "topic_seed" || external?.usageRole === "content_source"
-    ? { input: { targetDurationSeconds: creativeInput.targetDurationSeconds, visualDensity: creativeInput.visualDensity },
+    ? { input: { targetDurationSeconds: creativeInput.targetDurationSeconds, visualDensity: creativeInput.visualDensity, aspectRatio: creativeInput.aspectRatio },
       douyin, zhihu, webEnabled: creativeInput.webEnabled,
       sourcePolicy: creativeInput.webEnabled ? "只允许使用以下冻结搜索来源，不得补写其他事实或 URL" : "本次未联网核验",
       sources: sources.map(({ title, url, usageSummary, retrievedAt }) => ({ title, url, summary: usageSummary, retrievedAt })) }
@@ -276,13 +277,15 @@ export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonl
 }
 
 export function visualPrompt(snapshot: FrozenVideoPlanSnapshot, script: VideoScriptRevision) {
+  const profile = getVideoOutputProfile(snapshot.input.aspectRatio);
   return [
-    "【固定系统合同】", "为已生成旁白规划 9:16、1080×1920 的语义画面草案，不调用图片模型。图片内可读中文默认交给渲染层。",
+    "【固定系统合同】", `为已生成旁白规划 ${profile.aspectRatio}、${profile.width}×${profile.height} 的语义画面草案，不调用图片模型。图片内可读中文默认交给渲染层。`,
     "每个画面必须关联真实 paragraphId。generationStatus/currentCandidate 由系统补齐，不要输出。",
     "严格输出 JSON：{\"visuals\":[{\"paragraphId\":\"\",\"purpose\":\"\",\"description\":\"\",\"prompt\":\"\",\"negativePrompt\":\"\",\"suggestedDurationSeconds\":1,\"weight\":1}]}。不得增加字段或 Markdown。",
     "【全局补充】", snapshot.prompts.global.visualInstructions || "（无）", "【项目补充】", snapshot.prompts.project.visualInstructions || "（无）",
     "【视频补充】", snapshot.prompts.video.visualInstructions || "（无）",
     "【当前操作】", JSON.stringify({ visualDensity: snapshot.input.visualDensity, targetDurationSeconds: snapshot.input.targetDurationSeconds,
+      aspectRatio: snapshot.input.aspectRatio, outputProfile: profile,
       douyinMethod: snapshot.input.douyin && "methodProfile" in snapshot.input.douyin.payload
         ? { methodProfile: snapshot.input.douyin.payload.methodProfile } : null,
       zhihuMethod: snapshot.input.zhihu && "methodPatterns" in snapshot.input.zhihu.payload

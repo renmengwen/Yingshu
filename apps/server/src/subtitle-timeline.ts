@@ -13,6 +13,11 @@ export interface SubtitleCue {
   text: string;
 }
 
+export interface SubtitleRenderProfile {
+  width: number;
+  height: number;
+}
+
 const MAX_UNIT_LENGTH = SUBTITLE_LINE_LIMIT * 2;
 const SPEAKABLE_TEXT = /[\p{L}\p{N}]/u;
 const SENTENCE_END = /[。！？!?；;…]/u;
@@ -111,16 +116,16 @@ export function escapeAssText(text: string) {
   return text.replace(/\\/gu, "\\\\").replace(/\{/gu, "｛").replace(/\}/gu, "｝").replace(/\r?\n/gu, "\\N");
 }
 
-export function renderAss(cues: SubtitleCue[], offsetMs = 0) {
+export function renderAss(cues: SubtitleCue[], offsetMs = 0, profile: SubtitleRenderProfile = { width: 1080, height: 1920 }) {
   const events = cues.map((cue) =>
     `Dialogue: 0,${assTimestamp(cue.startMs - offsetMs, false)},${assTimestamp(cue.endMs - offsetMs, true)},Default,,0,0,0,,${escapeAssText(cue.text)}`,
   ).join("\n");
-  return `[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,Microsoft YaHei,54,&H00FFFFFF,&H000000FF,&H00181818,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,80,180,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n${events}\n`;
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${profile.width}\nPlayResY: ${profile.height}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,Microsoft YaHei,54,&H00FFFFFF,&H000000FF,&H00181818,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,80,180,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n${events}\n`;
 }
 
-export function renderSubtitleFiles(cues: SubtitleCue[]) {
+export function renderSubtitleFiles(cues: SubtitleCue[], profile: SubtitleRenderProfile = { width: 1080, height: 1920 }) {
   const srt = cues.map((cue) =>
     `${cue.index + 1}\n${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}\n${escapeSrtText(cue.text)}\n`,
   ).join("\n");
-  return { srt, ass: renderAss(cues) };
+  return { srt, ass: renderAss(cues, 0, profile) };
 }

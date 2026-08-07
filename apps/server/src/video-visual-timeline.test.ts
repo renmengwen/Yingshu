@@ -95,6 +95,7 @@ test("正式视觉时间轴连续、幂等，运镜编辑形成新 revision 并�
     const response = await app.inject({ method: "GET",
       url: `/api/projects/${value.project.id}/videos/${value.video.id}/visual-timelines` });
     await app.close();
+    assert.equal(response.json().workspace.aspectRatio, "9:16");
     assert.deepEqual(response.json().workspace.gates.map((gate: { key: string; valid: boolean }) =>
       [gate.key, gate.valid]), [["script", true], ["image", true], ["audio", true]]);
     assert.equal(createVideoVisualTimeline(value.connection.database, value.project.id, value.video.id, 130).id, first.id);

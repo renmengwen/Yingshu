@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { ProjectVideoStoreError } from "./project-video-store.js";
 import { getVideoRenderWorkspace } from "./video-render-store.js";
+import { getVideoOutputProfileForVideo } from "./video-output-profile.js";
 import {
   createVideoVisualTimeline, getCurrentVideoVisualTimeline, updateVideoVisualSegment, VideoVisualTimelineError,
 } from "./video-visual-timeline.js";
@@ -20,7 +21,9 @@ function sendError(error: unknown, reply: FastifyReply) {
 function workspace(database: DatabaseSync, projectId: string, videoId: string) {
   const gates = getVideoRenderWorkspace(database, projectId, videoId).readiness.gates
     .filter((gate) => gate.key !== "visual");
-  return { gates, timeline: getCurrentVideoVisualTimeline(database, projectId, videoId) };
+  // 时间轴预览与最终成片共享同一输出画幅，避免横屏候选被旧竖屏容器裁切。
+  return { aspectRatio: getVideoOutputProfileForVideo(database, projectId, videoId).aspectRatio,
+    gates, timeline: getCurrentVideoVisualTimeline(database, projectId, videoId) };
 }
 
 export async function registerVideoVisualTimelineRoutes(app: FastifyInstance, options: { database: DatabaseSync }) {
