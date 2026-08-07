@@ -50,7 +50,7 @@ export interface FinalVideoManifest {
     fileHash: string;
     bytes: number;
     durationMs: number;
-    streams: { video: "h264:1080x1920:25:yuv420p"; audio: "aac" };
+    streams: { video: typeof RENDER_CONTRACT.video; audio: "aac" };
   };
 }
 
@@ -267,7 +267,7 @@ export async function openVerifiedFinalExport(
       !Number.isSafeInteger(manifest.finalVideo.bytes) || manifest.finalVideo.bytes < 1 ||
       !Number.isSafeInteger(manifest.finalVideo.durationMs) || manifest.finalVideo.durationMs < 1 ||
       Object.keys(manifest.finalVideo).sort().join(",") !== "bytes,durationMs,fileHash,relativePath,streams" ||
-      JSON.stringify(manifest.finalVideo.streams) !== JSON.stringify({ video: "h264:1080x1920:25:yuv420p", audio: "aac" }) ||
+      JSON.stringify(manifest.finalVideo.streams) !== JSON.stringify({ video: RENDER_CONTRACT.video, audio: "aac" }) ||
       JSON.stringify({ ...manifest, finalVideo: undefined }) !==
         JSON.stringify({ ...base, exportHash: input.exportHash, finalVideo: undefined })) {
     throw new FinalExportReadError("导出清单与当前生产身份不一致", 409);
@@ -544,7 +544,7 @@ export async function exportFinalVideo(
     const fileHash = await sha256File(finalPath);
     const manifest: FinalVideoManifest = { ...manifestBase, exportHash, finalVideo: {
       relativePath: finalRelativePath, fileHash, bytes: measured.bytes, durationMs: measured.durationMs,
-      streams: { video: "h264:1080x1920:25:yuv420p", audio: "aac" },
+      streams: { video: RENDER_CONTRACT.video, audio: "aac" },
     } };
     if (Math.abs(measured.durationMs - rows.at(-1)!.end_ms) <= MAX_DURATION_DRIFT_MS &&
         await readFile(manifestPath, "utf8") === manifestText(manifest)) {
@@ -598,7 +598,7 @@ export async function exportFinalVideo(
     const fileHash = await sha256File(temporaryVideo);
     const manifest: FinalVideoManifest = { ...manifestBase, exportHash, finalVideo: {
       relativePath: finalRelativePath, fileHash, bytes: measured.bytes, durationMs: measured.durationMs,
-      streams: { video: "h264:1080x1920:25:yuv420p", audio: "aac" },
+      streams: { video: RENDER_CONTRACT.video, audio: "aac" },
     } };
     await writeDurable(join(staging, "manifest.json"), manifestText(manifest));
     await rename(temporaryVideo, join(staging, "video.mp4"));

@@ -56,6 +56,7 @@ const input = (override: Partial<VideoInputDraft> = {}): VideoInputDraft => ({
   referenceRole: "style_only",
   targetDurationSeconds: 180,
   visualDensity: "standard",
+  aspectRatio: "9:16",
   webEnabled: true,
   scriptInstructions: "  文案补充  ",
   visualInstructions: "  画面补充  ",
@@ -71,6 +72,7 @@ test("创作输入按冻结边界归一化并保留非当前模式草稿", () =>
   assert.equal(body.topic, "保留主题");
   assert.equal(body.body, "正文第一段\n\n正文第二段");
   assert.equal(body.referenceRole, "style_only");
+  assert.equal(validateVideoInput(input({ aspectRatio: "16:9" })).aspectRatio, "16:9");
   assert.equal(body.webEnabled, true);
 });
 
@@ -79,6 +81,7 @@ test("创作输入拒绝无效枚举、时长、必填和UTF-8字节超限", () 
   assert.throws(() => validateVideoInput(input({ inputMode: "body", body: " \n " })), /请粘贴视频正文/);
   assert.throws(() => validateVideoInput(input({ targetDurationSeconds: 60.5 })), /60～600秒的整数/);
   assert.throws(() => validateVideoInput(input({ visualDensity: "dense" as "standard" })), /画面密度无效/);
+  assert.throws(() => validateVideoInput(input({ aspectRatio: "1:1" as "9:16" })), /输出画幅无效/);
   assert.throws(() => validateVideoInput(input({ referenceText: "映".repeat(22_000) })), /64KiB/);
   assert.throws(() => validateProjectSettings({ scriptInstructions: "映".repeat(20_001), visualInstructions: "" }), /20000个字符/);
 });
@@ -124,9 +127,10 @@ test("生成入口统一阻止无效输入、自动保存中、处理中状态�
 });
 
 test("生成确认摘要明确展示冻结配置、执行步骤和下游边界", () => {
-  const confirmation = videoPlanLaunchConfirmation(input({ webEnabled: true }), "本地 fixture / text-model");
+  const confirmation = videoPlanLaunchConfirmation(input({ webEnabled: true, aspectRatio: "16:9" }), "本地 fixture / text-model");
   assert.equal(confirmation.modelLabel, "本地 fixture / text-model");
   assert.match(confirmation.web, /已开启/);
+  assert.equal(confirmation.spec, "横屏 · 16:9 · 1920 × 1080");
   assert.equal(confirmation.steps, "资料准备 → 旁白 → 画面规划");
   assert.match(confirmation.boundary, /不会自动生成图片、配音、字幕或视频/);
 });

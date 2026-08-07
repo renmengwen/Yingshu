@@ -27,6 +27,7 @@ import {
   VISUAL_STYLE_PRESETS,
 } from "./visual-style-presets";
 import type { useVideoPlan } from "./use-video-plan";
+import { getVideoOutputProfile } from "./types";
 import { DouyinAnalysisPanel } from "./douyin-analysis/DouyinAnalysisPanel";
 import { douyinPlanLaunchBlockReason } from "./douyin-analysis/logic";
 import { useDouyinAnalysis } from "./douyin-analysis/use-douyin-analysis";
@@ -157,11 +158,20 @@ export function VideoInputContent({
           entryBlockReason,
         )
       : null;
-  const visualInstructions = state.draft?.visualInstructions ?? "";
+  const draft = state.draft;
+  const visualInstructions = draft?.visualInstructions ?? "";
   const visualStylePreset = selectedVisualStylePreset(visualInstructions);
   const visualStyleLabel =
     VISUAL_STYLE_PRESETS.find((preset) => preset.id === visualStylePreset)
       ?.label ?? (visualInstructions.trim() ? "自定义画风" : "未设画风");
+  const outputProfile = getVideoOutputProfile(draft?.aspectRatio ?? "9:16");
+  const productionSummary = draft
+    ? `${draft.targetDurationSeconds / 60} 分钟 · ${draft.visualDensity === "relaxed"
+      ? "舒缓"
+      : draft.visualDensity === "compact"
+        ? "紧凑"
+        : "标准节奏"} · ${visualStyleLabel} · ${outputProfile.orientation} ${outputProfile.aspectRatio} · ${draft.webEnabled ? "联网查证" : "不联网"} · ${outputProfile.width} × ${outputProfile.height}`
+    : "";
 
   return (
     <section className="min-w-0" aria-labelledby="input-stage-heading">
@@ -401,14 +411,7 @@ export function VideoInputContent({
                     制作设置
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-[var(--fg-secondary)]">
-                    {state.draft.targetDurationSeconds / 60} 分钟 ·{" "}
-                    {state.draft.visualDensity === "relaxed"
-                      ? "舒缓节奏"
-                      : state.draft.visualDensity === "compact"
-                        ? "紧凑节奏"
-                        : "标准节奏"}{" "}
-                    · {visualStyleLabel} · 竖屏 9:16 ·{" "}
-                    {state.draft.webEnabled ? "联网查证" : "不联网"}
+                    {productionSummary}
                   </p>
                   <p className="mt-1 text-xs text-[var(--fg-tertiary)]">
                     {promptInstructionsStatus(

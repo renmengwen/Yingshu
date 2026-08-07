@@ -42,7 +42,7 @@ test("项目设置、视频输入和全局提示词使用正确默认值并彼�
 
     assert.deepEqual(getVideoInput(connection.database, first.id, firstVideo.id), {
       inputMode: "topic", topic: "", body: "", referenceText: "", referenceRole: "style_only",
-      targetDurationSeconds: 180, visualDensity: "standard", webEnabled: true,
+      targetDurationSeconds: 180, visualDensity: "standard", aspectRatio: "9:16", webEnabled: true,
       scriptInstructions: "", visualInstructions: "", updatedAt: 20,
     });
     assert.equal(getProjectSettings(connection.database, first.id).scriptInstructions, "");
@@ -58,17 +58,19 @@ test("项目设置、视频输入和全局提示词使用正确默认值并彼�
 
     const saved = putVideoInput(connection.database, first.id, firstVideo.id, draft(), 40);
     assert.equal(saved.referenceRole, "style_only");
+    assert.equal(saved.aspectRatio, "9:16");
     assert.equal(saved.webEnabled, true);
     assert.equal(getVideoInput(connection.database, first.id, secondVideo.id).topic, "");
 
     const bodySaved = putVideoInput(connection.database, first.id, firstVideo.id, draft({
       inputMode: "body", topic: "保留的主题", body: "正文第一段\r\n\r\n正文第二段",
       referenceRole: "content_source", targetDurationSeconds: 600,
-      visualDensity: "compact", webEnabled: false,
+      visualDensity: "compact", aspectRatio: "16:9", webEnabled: false,
     }), 50);
     assert.equal(bodySaved.topic, "保留的主题");
     assert.equal(bodySaved.body, "正文第一段\n\n正文第二段");
     assert.equal(bodySaved.referenceRole, "content_source");
+    assert.equal(bodySaved.aspectRatio, "16:9");
     assert.equal(bodySaved.webEnabled, false);
 
     const global = putGlobalPromptSettings(connection.database, {

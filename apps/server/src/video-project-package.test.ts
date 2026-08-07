@@ -148,7 +148,7 @@ async function fixture() {
   return { root, dataRoot, connection, artifacts, zhihuArtifacts, evidenceHash };
 }
 
-test("v27 Video 项目包恢复当前抖音证据且排除缓存和秘密", async () => {
+test("v28 Video 项目包恢复当前抖音证据且排除缓存和秘密", async () => {
   const value = await fixture();
   try {
     const packagePath = join(value.root, "package");
@@ -190,7 +190,7 @@ test("v27 Video 项目包恢复当前抖音证据且排除缓存和秘密", asyn
       "zhihu-answer", "zhihu-comments", "zhihu-report",
       "zhihu-image",
     ]));
-    assert.equal(created.manifest.schemaVersion, 27);
+    assert.equal(created.manifest.schemaVersion, 28);
     assert.equal(JSON.stringify(created.manifest).includes("zhimg.com"), false);
     const packagedAnswer = await readFile(join(packagePath, "payload", "zhihu", "analyses", "video", "zhihu-snapshot", "answer.json"), "utf8");
     assert.equal(packagedAnswer.includes("zhimg.com"), false);

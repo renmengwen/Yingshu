@@ -8,10 +8,12 @@ export const CREATIVE_INPUT_LIMITS = {
 export const INPUT_MODES = ["topic", "body"] as const;
 export const REFERENCE_ROLES = ["style_only", "content_source"] as const;
 export const VISUAL_DENSITIES = ["relaxed", "standard", "compact"] as const;
+export const OUTPUT_ASPECT_RATIOS = ["9:16", "16:9"] as const;
 
 export type InputMode = typeof INPUT_MODES[number];
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
 export type VisualDensity = typeof VISUAL_DENSITIES[number];
+export type OutputAspectRatio = typeof OUTPUT_ASPECT_RATIOS[number];
 
 export interface CreativeInstructions {
   scriptInstructions: string;
@@ -26,6 +28,7 @@ export interface VideoInputDraft extends CreativeInstructions {
   referenceRole: ReferenceRole;
   targetDurationSeconds: number;
   visualDensity: VisualDensity;
+  aspectRatio: OutputAspectRatio;
   webEnabled: boolean;
 }
 
@@ -36,6 +39,23 @@ export class CreativeInputError extends Error {
 function exactObject(value: unknown, fields: readonly string[], message: string) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       Object.keys(value).sort().join(",") !== [...fields].sort().join(",")) {
+    throw new CreativeInputError(400, message);
+  }
+  return value as Record<string, unknown>;
+}
+
+function exactObjectWithOptionalFields(
+  value: unknown,
+  requiredFields: readonly string[],
+  optionalFields: readonly string[],
+  message: string,
+) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CreativeInputError(400, message);
+  }
+  const keys = Object.keys(value);
+  const allowed = new Set([...requiredFields, ...optionalFields]);
+  if (keys.some((key) => !allowed.has(key)) || requiredFields.some((key) => !(key in (value as Record<string, unknown>)))) {
     throw new CreativeInputError(400, message);
   }
   return value as Record<string, unknown>;
@@ -75,8 +95,16 @@ function enumeration<T extends string>(value: unknown, values: readonly T[], lab
 
 const INSTRUCTION_FIELDS = ["scriptInstructions", "visualInstructions"] as const;
 const VIDEO_INPUT_FIELDS = [
-  "inputMode", "topic", "body", "referenceText", "referenceRole", "targetDurationSeconds",
-  "visualDensity", "webEnabled", ...INSTRUCTION_FIELDS,
+  "inputMode",
+  "topic",
+  "body",
+  "referenceText",
+  "referenceRole",
+  "targetDurationSeconds",
+  "visualDensity",
+  "aspectRatio",
+  "webEnabled",
+  ...INSTRUCTION_FIELDS,
 ] as const;
 
 export function parseCreativeInstructions(value: unknown, label = "创作设置"): CreativeInstructions {
@@ -90,7 +118,10 @@ export function parseCreativeInstructions(value: unknown, label = "创作设置"
 }
 
 export function parseVideoInputDraft(value: unknown, options: { allowEmptyPrimary?: boolean } = {}): VideoInputDraft {
-  const input = exactObject(value, VIDEO_INPUT_FIELDS, "视频输入草稿字段不完整或包含未支持字段");
+  const input = exactObjectWithOptionalFields(value,
+    VIDEO_INPUT_FIELDS.filter((field) => field !== "aspectRatio"),
+    ["aspectRatio"],
+    "视频输入草稿字段不完整或包含未支持字段");
   const inputMode = enumeration(input.inputMode, INPUT_MODES, "输入模式");
   const normalizedTopic = topic(input.topic);
   const body = multiline(input.body, "正文", CREATIVE_INPUT_LIMITS.bodyBytes, "bytes");
@@ -103,8 +134,11 @@ export function parseVideoInputDraft(value: unknown, options: { allowEmptyPrimar
   if (typeof input.targetDurationSeconds !== "number" ||
       !Number.isInteger(input.targetDurationSeconds) ||
       input.targetDurationSeconds < 60 || input.targetDurationSeconds > 600) {
-    throw new CreativeInputError(400, "目标时长必须是 60～600 秒的整数");
+    throw new CreativeInputError(400, "目标时长必须是 60 到 600 秒的整数");
   }
+  const aspectRatio = input.aspectRatio === undefined
+    ? "9:16"
+    : enumeration(input.aspectRatio, OUTPUT_ASPECT_RATIOS, "画幅比例");
   if (typeof input.webEnabled !== "boolean") {
     throw new CreativeInputError(400, "本次联网开关必须是布尔值");
   }
@@ -117,6 +151,7 @@ export function parseVideoInputDraft(value: unknown, options: { allowEmptyPrimar
     referenceRole: enumeration(input.referenceRole, REFERENCE_ROLES, "参考文本角色"),
     targetDurationSeconds: input.targetDurationSeconds,
     visualDensity: enumeration(input.visualDensity, VISUAL_DENSITIES, "画面密度"),
+    aspectRatio,
     webEnabled: input.webEnabled,
     ...parseCreativeInstructions({
       scriptInstructions: input.scriptInstructions,

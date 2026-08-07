@@ -13,12 +13,16 @@ import { getVideoImageWorkspace } from "./video-image-store.js";
 import { getVideoAudioReview } from "./video-audio-review.js";
 import { getVideoVisualReview } from "./video-visual-review.js";
 import { assertCurrentVideoVisualTimelineReady } from "./video-visual-timeline.js";
+import { getVideoOutputProfileForVideo } from "./video-output-profile.js";
 
 export const VIDEO_RENDER_JOB_TYPE = "video_render";
-export const VIDEO_RENDER_PARAMS = {
-  width: 1080, height: 1920, fps: 25, videoCodec: "h264", audioCodec: "aac",
-  pixelFormat: "yuv420p", container: "mp4", subtitles: "ass",
-} as const;
+export function videoRenderParams(database: DatabaseSync, projectId: string, videoId: string) {
+  const profile = getVideoOutputProfileForVideo(database, projectId, videoId);
+  return {
+    aspectRatio: profile.aspectRatio, width: profile.width, height: profile.height, fps: 25, videoCodec: "h264", audioCodec: "aac",
+    pixelFormat: "yuv420p", container: "mp4", subtitles: "ass",
+  } as const;
+}
 
 const HASH = /^[0-9a-f]{64}$/u;
 const ID = /^[A-Za-z0-9_-]+$/u;
@@ -42,13 +46,14 @@ function currentReview(database: DatabaseSync, projectId: string, videoId: strin
 export function videoRenderIdentity(database: DatabaseSync, projectId: string, videoId: string) {
   getVideo(database, projectId, videoId);
   const { timeline, review } = currentReview(database, projectId, videoId);
-  const paramsJson = canonical(VIDEO_RENDER_PARAMS);
+  const params = videoRenderParams(database, projectId, videoId);
+  const paramsJson = canonical(params);
   const paramsHash = videoRenderSha256(paramsJson);
   const identityHash = videoRenderSha256(canonical({
     projectId, videoId, timelineId: timeline.id, timelineHash: timeline.timelineHash,
     timelineIdentityHash: timeline.identityHash, visualReviewId: review.id, paramsHash,
   }));
-  return { timeline, review, paramsJson, paramsHash, identityHash };
+  return { timeline, review, params, paramsJson, paramsHash, identityHash };
 }
 
 interface RunRow {
@@ -114,7 +119,7 @@ export function getVideoRenderWorkspace(database: DatabaseSync, projectId: strin
     ).get(projectId, videoId) as RunRow | undefined;
   return {
     readiness: {
-      ready: readiness !== null, issues: issue ? [issue] : [], gates, spec: VIDEO_RENDER_PARAMS,
+      ready: readiness !== null, issues: issue ? [issue] : [], gates, spec: readiness?.params ?? videoRenderParams(database, projectId, videoId),
       segmentCount: readiness?.timeline.segments.length ?? 0,
       durationMs: readiness?.timeline.audioDurationMs ?? 0,
       estimatedChunks: readiness?.timeline.segments.length ?? 0,

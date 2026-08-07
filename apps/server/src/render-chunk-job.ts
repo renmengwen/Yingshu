@@ -11,6 +11,7 @@ import { type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { renderNineSixteenTemplate, type NineSixteenScene } from "./nine-sixteen-template.js";
 import { requireApprovedScriptForProduction } from "./script-approval-store.js";
 import { renderAss } from "./subtitle-timeline.js";
+import { getVideoOutputProfile, parseAspectRatio } from "./video-output-profile.js";
 import { assertVisualPlanReady, type VisualSegmentRecord } from "./visual-segment-store.js";
 
 export const RENDER_CHUNKS_JOB_TYPE = "render_chunks";
@@ -67,6 +68,7 @@ export interface RenderPlanSnapshot {
   scriptVersionId: string;
   approvalRevision: number;
   timelineHash: string;
+  profile: { aspectRatio: "9:16" | "16:9"; width: number; height: number };
   chunks: ExpectedRenderChunk[];
 }
 
@@ -74,6 +76,15 @@ interface RenderChunkDependencies {
   render: typeof renderNineSixteenTemplate;
   probe: typeof probeNineSixteenVideo;
   concatAudio(paths: string[], outputPath: string, signal: AbortSignal): Promise<void>;
+}
+
+function renderContract(profile: { width: number; height: number }) {
+  return {
+    template: "nine-sixteen-template-v1",
+    video: `h264:${profile.width}x${profile.height}:25:yuv420p`,
+    audio: "aac",
+    container: "mp4:faststart:shortest",
+  } as const;
 }
 
 function sha256(content: string | Buffer) {
@@ -230,13 +241,14 @@ export function renderChunkIdentity(input: {
   scriptVersionId: string;
   approvalRevision: number;
   timelineHash: string;
+  profile: { width: number; height: number };
   chunk: RenderChunkPlan;
   candidates: Map<string, CandidateRow>;
   audio: AudioRow[];
   assHash: string;
 }) {
   const identity = {
-    contract: RENDER_CONTRACT,
+    contract: renderContract(input.profile),
     episodeId: input.episodeId,
     scriptVersionId: input.scriptVersionId,
     approvalRevision: input.approvalRevision,
@@ -308,6 +320,7 @@ export function loadRenderPlanSnapshot(
   timelineHash: string,
 ): RenderPlanSnapshot {
   const permit = requireApprovedScriptForProduction(database, episodeId, "video");
+  const profile = getVideoOutputProfile(parseAspectRatio("9:16"));
   const segments = assertVisualPlanReady(database, episodeId, timelineHash);
   if (segments.some((segment) => segment.scriptVersionId !== permit.scriptVersionId ||
       segment.approvalRevision !== permit.approvalRevision)) throw new Error("视觉计划与当前批准稿不一致");
@@ -336,12 +349,12 @@ export function loadRenderPlanSnapshot(
       endMs: chunk.endMs,
       renderHash: renderChunkIdentity({
         episodeId, scriptVersionId: permit.scriptVersionId, approvalRevision: permit.approvalRevision,
-        timelineHash, chunk, candidates, audio: chunkAudio, assHash: sha256(localAss(chunkCues, chunk.startMs)),
+        timelineHash, profile, chunk, candidates, audio: chunkAudio, assHash: sha256(localAss(chunkCues, chunk.startMs)),
       }).renderHash,
     };
   });
   return { episodeId, scriptVersionId: permit.scriptVersionId, approvalRevision: permit.approvalRevision,
-    timelineHash, chunks };
+    timelineHash, profile, chunks };
 }
 
 export function createRenderChunksJobHandler(
@@ -352,6 +365,7 @@ export function createRenderChunksJobHandler(
   const render = dependencies.render ?? renderNineSixteenTemplate;
   const probe = dependencies.probe ?? probeNineSixteenVideo;
   const joinAudio = dependencies.concatAudio ?? concatAudio;
+  const profile = getVideoOutputProfile(parseAspectRatio("9:16"));
   return async (context: JobExecutionContext) => {
     const { episodeId, timelineHash } = taskPayload(context.job.payload);
     const permit = requireApprovedScriptForProduction(database, episodeId, "video");
@@ -395,7 +409,7 @@ export function createRenderChunksJobHandler(
       const assHash = sha256(ass);
       const { renderHash } = renderChunkIdentity({
         episodeId, scriptVersionId: permit.scriptVersionId, approvalRevision: permit.approvalRevision,
-        timelineHash, chunk, candidates, audio: chunkAudio, assHash,
+        timelineHash, profile, chunk, candidates, audio: chunkAudio, assHash,
       });
       const relativePath = `episodes/${episodeId}/renders/chunks/${renderHash.slice(0, 2)}/${renderHash}.mp4`;
       const outputPath = artifactPath(dataRoot, relativePath);
@@ -445,7 +459,8 @@ export function createRenderChunksJobHandler(
             scenes.push({ imagePath: snapshot, durationMs: segment.endMs - segment.startMs,
               motionKind: segment.motionKind, motionAmountPpm: segment.motionAmountPpm, fadeMs: segment.fadeMs });
           }
-          await render({ scenes, audioPath: temporaryAudio, assPath: temporaryAss, outputPath, signal: controller.signal });
+          await render({ scenes, audioPath: temporaryAudio, assPath: temporaryAss, outputPath,
+            aspectRatio: profile.aspectRatio, signal: controller.signal });
         }
       } finally {
         clearInterval(poll);
@@ -482,7 +497,7 @@ export function createRenderChunksJobHandler(
         const currentChunkCues = currentCues.filter((cue) => cue.start_ms >= chunk.startMs && cue.end_ms <= chunk.endMs);
         const currentHash = renderChunkIdentity({
           episodeId, scriptVersionId: current.scriptVersionId, approvalRevision: current.approvalRevision,
-          timelineHash, chunk: currentChunk, candidates: currentCandidates,
+          timelineHash, profile, chunk: currentChunk, candidates: currentCandidates,
           audio: currentChunkCues.map((cue) => currentAudio[cue.segment_index]!),
           assHash: sha256(localAss(currentChunkCues, currentChunk.startMs)),
         }).renderHash;

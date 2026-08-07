@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { backup, DatabaseSync, type DatabaseSync as Database } from "node:sqlite";
 
 export const VIDEO_PROJECT_PACKAGE_VERSION = "yingshu-video-project-package-v1" as const;
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 const HASH = /^[0-9a-f]{64}$/u;
 const MAX_FILES = 10_000;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
@@ -164,7 +164,7 @@ function assertZhihuReplyFailureSummary(value: Record<string, unknown>) {
 function validateDatabase(database: Database) {
   const versions = database.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>;
   if (versions.length !== SCHEMA_VERSION || versions.some((row, index) => row.version !== index + 1)) {
-    throw new Error("视频项目包只支持当前 v27 数据库");
+    throw new Error("视频项目包只支持当前 v28 数据库");
   }
   if (database.prepare("PRAGMA integrity_check").get()?.integrity_check !== "ok" || database.prepare("PRAGMA foreign_key_check").all().length) {
     throw new Error("视频项目数据库完整性校验失败");

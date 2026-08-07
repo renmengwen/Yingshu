@@ -41,7 +41,7 @@ test("真实 Video 分片可恢复渲染生成严格 MP4、清单并受控读取
     putGlobalPromptSettings(db, { scriptInstructions: "简洁", visualInstructions: "竖屏" }, 30);
     putProjectSettings(db, project.id, { scriptInstructions: "准确", visualInstructions: "插画" }, 40);
     putVideoInput(db, project.id, video.id, { inputMode: "topic", topic: "蓝天", body: "", referenceText: "",
-      referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard", webEnabled: false,
+      referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard", aspectRatio: "16:9", webEnabled: false,
       scriptInstructions: "", visualInstructions: "" }, 50);
     const config = { baseUrl: "https://example.invalid", apiKey: "secret-never-in-manifest", model: "fixture", providerId: "fixture" };
     enqueueVideoPlanJob(db, { projectId: project.id, videoId: video.id, idempotencyKey: "render-plan", config, now: 60 });
@@ -80,7 +80,7 @@ test("真实 Video 分片可恢复渲染生成严格 MP4、清单并受控读取
     const audio = await readFile(audioPath);
     const cue = { index: 0, paragraphId: plan.script.paragraphs[0]!.id, text: narration,
       startMs: 0, endMs: 1_000, hash: hash("render-cue") };
-    const subtitles = renderSubtitleFiles([cue]);
+    const subtitles = renderSubtitleFiles([cue], { width: 1920, height: 1080 });
     const srtRelative = `videos/${video.id}/tts/fixture.srt`;
     const assRelative = `videos/${video.id}/tts/fixture.ass`;
     await writeFile(join(dataRoot, srtRelative), subtitles.srt);
@@ -109,6 +109,10 @@ test("真实 Video 分片可恢复渲染生成严格 MP4、清单并受控读取
     await new JobWorker(db, { [VIDEO_RENDER_JOB_TYPE]: createVideoRenderJobHandler(db, dataRoot) },
       { workerId: "real-render", leaseMs: 30_000, heartbeatMs: 1_000 }).runOne();
     const completed = getVideoRenderWorkspace(db, project.id, video.id).render;
+    assert.deepEqual(getVideoRenderWorkspace(db, project.id, video.id).readiness.spec, {
+      aspectRatio: "16:9", width: 1920, height: 1080, fps: 25,
+      videoCodec: "h264", audioCodec: "aac", pixelFormat: "yuv420p", container: "mp4", subtitles: "ass",
+    });
     assert.equal(completed?.status, "succeeded", completed?.errorMessage ?? "渲染失败");
     assert.equal(completed?.chunks.succeeded, 2);
     const oldChunkIdentities = (db.prepare(
@@ -139,8 +143,8 @@ test("真实 Video 分片可恢复渲染生成严格 MP4、清单并受控读取
     assert.equal(media.status, 0, media.stderr);
     assert.match(media.stdout, /"codec_name": "h264"/u);
     assert.match(media.stdout, /"codec_name": "aac"/u);
-    assert.match(media.stdout, /"width": 1080/u);
-    assert.match(media.stdout, /"height": 1920/u);
+    assert.match(media.stdout, /"width": 1920/u);
+    assert.match(media.stdout, /"height": 1080/u);
     const manifest = await readFile(join(dataRoot, row.manifest_relative_path), "utf8");
     assert.equal(manifest.includes(dataRoot), false);
     assert.equal(manifest.includes("secret-never-in-manifest"), false);

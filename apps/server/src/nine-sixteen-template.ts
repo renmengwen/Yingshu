@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
-import { probeNineSixteenVideo, runVideoProcess } from "./ffmpeg-video.js";
+import { probeVideoOutputVideo, runVideoProcess } from "./ffmpeg-video.js";
 import { JobCancelledError } from "./job-worker.js";
+import { getVideoOutputProfile, parseAspectRatio, type AspectRatio } from "./video-output-profile.js";
 
 const MOTIONS = ["none", "pan-left", "pan-right", "zoom-in", "zoom-out"] as const;
 export type NineSixteenMotionKind = typeof MOTIONS[number];
@@ -21,6 +22,7 @@ export interface NineSixteenRenderInput {
   audioPath: string;
   assPath: string;
   outputPath: string;
+  aspectRatio?: AspectRatio;
   signal?: AbortSignal;
 }
 
@@ -35,9 +37,9 @@ async function ordinaryFile(path: string, label: string) {
   if (!(await stat(path)).isFile()) throw new Error(`${label}不是普通文件`);
 }
 
-function absolutePath(path: unknown, label: string) {
-  if (typeof path !== "string" || !path) throw new Error(`${label}路径无效`);
-  return resolve(path);
+function absolutePath(value: unknown, label: string) {
+  if (typeof value !== "string" || !value) throw new Error(`${label}路径无效`);
+  return resolve(value);
 }
 
 async function syncFile(path: string) {
@@ -45,7 +47,7 @@ async function syncFile(path: string) {
   try { await file.sync(); } finally { await file.close(); }
 }
 
-function sceneFilter(scene: NineSixteenScene, index: number) {
+function sceneFilter(scene: NineSixteenScene, index: number, profile: { width: number; height: number }) {
   const seconds = (scene.durationMs / 1_000).toFixed(3);
   const frames = Math.max(1, Math.ceil(scene.durationMs * 25 / 1_000));
   const progress = frames === 1 ? "0" : `on/${frames - 1}`;
@@ -67,16 +69,17 @@ function sceneFilter(scene: NineSixteenScene, index: number) {
   const fades = scene.fadeMs === 0 ? "" :
     `,fade=t=in:st=0:d=${(scene.fadeMs / 1_000).toFixed(3)}` +
     `,fade=t=out:st=${((scene.durationMs - scene.fadeMs) / 1_000).toFixed(3)}:d=${(scene.fadeMs / 1_000).toFixed(3)}`;
-  return `[${index}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,` +
-    `zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=1080x1920:fps=25,` +
+  return `[${index}:v]scale=${profile.width}:${profile.height}:force_original_aspect_ratio=increase,crop=${profile.width}:${profile.height},` +
+    `zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=${profile.width}x${profile.height}:fps=25,` +
     `trim=duration=${seconds},setpts=PTS-STARTPTS${fades}[scene${index}]`;
 }
 
 export function buildNineSixteenFfmpegArgs(input: NineSixteenRenderInput, renderedOutputPath = input.outputPath) {
+  const profile = getVideoOutputProfile(input.aspectRatio ?? "9:16");
   const inputs = input.scenes.flatMap((scene) => [
     "-loop", "1", "-framerate", "25", "-t", (scene.durationMs / 1_000).toFixed(3), "-i", resolve(scene.imagePath),
   ]);
-  const filters = input.scenes.map(sceneFilter);
+  const filters = input.scenes.map((scene, index) => sceneFilter(scene, index, profile));
   const sceneLabels = input.scenes.map((_, index) => `[scene${index}]`).join("");
   filters.push(`${sceneLabels}concat=n=${input.scenes.length}:v=1:a=0[visual]`);
   filters.push(`[visual]ass=${basename(input.assPath)}[subtitled]`);
@@ -93,14 +96,17 @@ export async function renderNineSixteenTemplate(
   input: NineSixteenRenderInput,
   dependencies: {
     run?: typeof runVideoProcess;
-    probe?: typeof probeNineSixteenVideo;
+    probe?: typeof probeVideoOutputVideo;
     sync?: typeof syncFile;
     rename?: typeof rename;
   } = {},
 ) {
   if (!Array.isArray(input.scenes) || input.scenes.length === 0) throw new Error("画面场景不能为空");
+  const aspectRatio = parseAspectRatio(input.aspectRatio ?? "9:16");
+  const profile = getVideoOutputProfile(aspectRatio);
   const normalized: NineSixteenRenderInput = {
     ...input,
+    aspectRatio,
     scenes: input.scenes.map((scene, index) => ({
       ...scene,
       imagePath: absolutePath(scene?.imagePath, `第 ${index + 1} 个场景图片`),
@@ -135,7 +141,7 @@ export async function renderNineSixteenTemplate(
       { cwd: dirname(normalized.assPath), signal: input.signal },
     );
     if (input.signal?.aborted) throw new JobCancelledError();
-    const rendered = await (dependencies.probe ?? probeNineSixteenVideo)(temporaryPath, input.signal);
+    const rendered = await (dependencies.probe ?? probeVideoOutputVideo)(temporaryPath, profile, input.signal);
     if (input.signal?.aborted) throw new JobCancelledError();
     const expectedDurationMs = normalized.scenes.reduce((total, scene) => total + scene.durationMs, 0);
     if (Math.abs(rendered.durationMs - expectedDurationMs) > 1_000) throw new Error("视频时长与场景时间轴不一致");

@@ -27,7 +27,7 @@ async function approvedFixture() {
   putGlobalPromptSettings(connection.database, { scriptInstructions: "简洁", visualInstructions: "竖屏" }, 30);
   putProjectSettings(connection.database, project.id, { scriptInstructions: "科普", visualInstructions: "插画" }, 40);
   putVideoInput(connection.database, project.id, video.id, { inputMode: "topic", topic: "蓝天", body: "", referenceText: "平实科普",
-    referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard", webEnabled: false,
+    referenceRole: "style_only", targetDurationSeconds: 60, visualDensity: "standard", aspectRatio: "16:9", webEnabled: false,
     scriptInstructions: "", visualInstructions: "" }, 50);
   const queued = enqueueVideoPlanJob(connection.database, { projectId: project.id, videoId: video.id,
     idempotencyKey: "plan", config: textConfig, now: 60 });
@@ -68,6 +68,8 @@ test("Video 图片批次复用现有 Job 与真实媒体校验，并以 CAS 完�
     const handler = createVideoImageJobHandler(value.connection.database, value.dataRoot, async () => imageConfig, {
       generate: async (input) => {
         assert.equal(input.negativePrompt, "watermark, text");
+        assert.equal(input.aspectRatio, "16:9");
+        assert.equal(input.size, "2848x1600");
         calls += 1;
         return { bytes: await readFile(fixturePath) };
       },
@@ -82,6 +84,8 @@ test("Video 图片批次复用现有 Job 与真实媒体校验，并以 CAS 完�
     let workspace = getVideoImageWorkspace(value.connection.database, value.project.id, value.video.id);
     assert.equal(workspace.candidates.length, 1);
     assert.equal(workspace.candidates[0]!.mime, "image/png");
+    assert.equal(workspace.candidates[0]!.aspectRatio, "16:9");
+    assert.equal(workspace.candidates[0]!.parameters.size, "2848x1600");
     assert.equal(workspace.gateComplete, false);
     workspace = approveVideoImageCandidate(value.connection.database, value.dataRoot, { projectId: value.project.id,
       videoId: value.video.id, visualId: value.visualId, candidateId: workspace.candidates[0]!.id,

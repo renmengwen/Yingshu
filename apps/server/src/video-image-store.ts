@@ -8,12 +8,14 @@ import { publishAssetCandidate, type PublishedAssetCandidate } from "./asset-can
 import { withDataFileMutationLock } from "./data-file-mutation-lock.js";
 import { createJob, getJob, requestJobCancellation } from "./job-store.js";
 import { getVideo } from "./project-video-store.js";
+import { getVideoInput } from "./creative-input-store.js";
 import { getVideoPlan } from "./video-plan-store.js";
 import {
-  VIDEO_IMAGE_CANDIDATES_PER_VISUAL, VIDEO_IMAGE_JOB_TYPE, VIDEO_IMAGE_SIZE,
+  VIDEO_IMAGE_JOB_TYPE,
   VideoImageError, type VideoImageBatchMode, type VideoImageJobPayload, type VideoImageOrigin,
-  type VideoImagePermit, videoImageRequestIdentity, videoImageSha256, videoImageText,
+  type VideoImagePermit, videoImageParameters, videoImageRequestIdentity, videoImageSha256, videoImageText,
 } from "./video-image-contract.js";
+import { getImageOutputProfile, parseAspectRatio } from "./video-output-profile.js";
 
 interface CandidateRow {
   id: string; project_id: string; video_id: string; plan_snapshot_id: string; plan_snapshot_hash: string;
@@ -27,14 +29,18 @@ interface CandidateRow {
 }
 
 function candidate(row: CandidateRow, compatible: boolean) {
+  const parameters = JSON.parse(row.params_json) as { aspectRatio?: unknown; size?: unknown; candidates?: unknown };
+  const aspectRatio = parseAspectRatio(parameters.aspectRatio);
   return {
     id: row.id, projectId: row.project_id, videoId: row.video_id, visualId: row.visual_id,
+    aspectRatio,
     planSnapshotId: row.plan_snapshot_id, planSnapshotHash: row.plan_snapshot_hash,
     scriptRevisionId: row.script_revision_id, scriptContentHash: row.script_content_hash,
     visualRevisionId: row.visual_revision_id, visualContentHash: row.visual_content_hash,
     prompt: row.prompt, negativePrompt: row.negative_prompt, styleSnapshot: JSON.parse(row.style_snapshot_json),
     promptHash: row.prompt_hash, providerId: row.provider_id, model: row.model_id,
-    parameters: JSON.parse(row.params_json), requestIdentity: row.request_identity, jobId: row.job_id,
+    parameters: { ...parameters, aspectRatio, size: getImageOutputProfile(aspectRatio).size, candidates: 1 },
+    requestIdentity: row.request_identity, jobId: row.job_id,
     attempt: row.attempt, checkpointScope: row.checkpoint_scope, providerRequestId: row.provider_request_id,
     origin: row.origin, originalFileName: row.original_file_name, relativePath: row.relative_path,
     mime: row.mime, bytes: row.bytes, width: row.width, height: row.height, fileHash: row.file_hash,
@@ -45,6 +51,7 @@ function candidate(row: CandidateRow, compatible: boolean) {
 
 export function requireVideoImagePermit(database: DatabaseSync, projectId: string, videoId: string, visualId?: string) {
   getVideo(database, projectId, videoId);
+  const input = getVideoInput(database, projectId, videoId);
   const plan = getVideoPlan(database, projectId, videoId);
   if (!plan || plan.stale || !plan.approval?.valid) {
     throw new VideoImageError(409, "当前方案尚未有效批准，不能生产配图");
@@ -58,7 +65,8 @@ export function requireVideoImagePermit(database: DatabaseSync, projectId: strin
       weight: visual.weight,
     };
     return {
-      projectId, videoId, planSnapshotId: plan.snapshotId, planSnapshotHash: plan.snapshotHash,
+      projectId, videoId, aspectRatio: input.aspectRatio,
+      planSnapshotId: plan.snapshotId, planSnapshotHash: plan.snapshotHash,
       scriptRevisionId: plan.script.id, scriptContentHash: plan.script.contentHash,
       visualRevisionId: plan.visual.id, visualContentHash: plan.visual.contentHash,
       visualId: visual.id, prompt: videoImageText(visual.prompt, "画面提示词", 20_000),
@@ -72,6 +80,7 @@ export function permitStillCurrent(database: DatabaseSync, permit: VideoImagePer
   try {
     const current = requireVideoImagePermit(database, permit.projectId, permit.videoId, permit.visualId)[0];
     return !!current && current.planSnapshotId === permit.planSnapshotId && current.planSnapshotHash === permit.planSnapshotHash &&
+      current.aspectRatio === permit.aspectRatio &&
       current.scriptRevisionId === permit.scriptRevisionId && current.scriptContentHash === permit.scriptContentHash &&
       current.visualRevisionId === permit.visualRevisionId && current.visualContentHash === permit.visualContentHash &&
       current.promptHash === permit.promptHash;
@@ -79,10 +88,12 @@ export function permitStillCurrent(database: DatabaseSync, permit: VideoImagePer
 }
 
 function compatibleCandidateExists(database: DatabaseSync, permit: VideoImagePermit) {
+  const parameters = videoImageParameters(permit.aspectRatio);
   return !!database.prepare(
     `SELECT 1 FROM video_image_candidates WHERE video_id=? AND visual_id=? AND plan_snapshot_id=?
-     AND script_revision_id=? AND visual_revision_id=? AND prompt_hash=? AND status='succeeded' LIMIT 1`,
-  ).get(permit.videoId, permit.visualId, permit.planSnapshotId, permit.scriptRevisionId, permit.visualRevisionId, permit.promptHash);
+     AND script_revision_id=? AND visual_revision_id=? AND prompt_hash=? AND params_json=? AND status='succeeded' LIMIT 1`,
+  ).get(permit.videoId, permit.visualId, permit.planSnapshotId, permit.scriptRevisionId, permit.visualRevisionId,
+    permit.promptHash, JSON.stringify(parameters));
 }
 
 export function syncVideoImageStatus(database: DatabaseSync, videoId: string, now = Date.now()) {
@@ -142,7 +153,7 @@ export function enqueueVideoImageBatch(database: DatabaseSync, input: {
       const jobId = `job_video_image_${requestIdentity}`;
       const payload: VideoImageJobPayload = {
         ...permit, batchId, requestIdentity, providerId, model,
-        parameters: { size: VIDEO_IMAGE_SIZE, candidates: VIDEO_IMAGE_CANDIDATES_PER_VISUAL }, attempt: 1,
+        parameters: videoImageParameters(permit.aspectRatio), attempt: 1,
       };
       createJob(database, { id: jobId, type: VIDEO_IMAGE_JOB_TYPE, payload, maxAttempts: 1 }, now);
       database.prepare(
@@ -261,7 +272,7 @@ export async function uploadVideoImageCandidate(database: DatabaseSync, dataRoot
   const uploadIdentity = `upload_${randomUUID()}`;
   const payload: VideoImageJobPayload = {
     ...permit, batchId: "upload", requestIdentity: uploadIdentity, providerId: "upload", model: "upload",
-    parameters: { size: VIDEO_IMAGE_SIZE, candidates: 1 }, attempt: 1,
+    parameters: videoImageParameters(permit.aspectRatio), attempt: 1,
   };
   const id = await withDataFileMutationLock(dataRoot, async () => {
     if (!permitStillCurrent(database, permit)) {

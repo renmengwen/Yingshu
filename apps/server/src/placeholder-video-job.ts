@@ -8,6 +8,7 @@ import { probeNineSixteenVideo, runVideoProcess, type VideoProbe } from "./ffmpe
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { requireApprovedScriptForProduction } from "./script-approval-store.js";
 import { probeSystemSpeechWav } from "./tts-timeline-job.js";
+import { getVideoOutputProfile, parseAspectRatio, type AspectRatio } from "./video-output-profile.js";
 
 export const PLACEHOLDER_VIDEO_JOB_TYPE = "placeholder_video";
 const MAX_DURATION_DRIFT_MS = 1_000;
@@ -21,6 +22,7 @@ interface RenderInput {
   assPath: string;
   concatPath: string;
   outputPath: string;
+  aspectRatio?: AspectRatio;
   signal: AbortSignal;
 }
 
@@ -87,9 +89,10 @@ function payload(value: unknown) {
 export const probePlaceholderVideo = probeNineSixteenVideo;
 
 async function renderPlaceholderVideo(input: RenderInput) {
+  const profile = getVideoOutputProfile(parseAspectRatio(input.aspectRatio ?? "9:16"));
   await runVideoProcess("ffmpeg", [
     "-v", "error", "-y",
-    "-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=25",
+    "-f", "lavfi", "-i", `color=c=black:s=${profile.width}x${profile.height}:r=25`,
     "-f", "concat", "-safe", "0", "-i", input.concatPath,
     "-vf", `ass=${basename(input.assPath)}`,
     "-af", "asetpts=N/SR/TB",

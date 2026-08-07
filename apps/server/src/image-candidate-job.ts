@@ -19,6 +19,7 @@ import {
 import { createJob, getJob, type CreateJobInput, type JobRecord } from "./job-store.js";
 import { JobCancelledError, type JobExecutionContext, type JobHandler } from "./job-worker.js";
 import { requireApprovedScriptForProduction } from "./script-approval-store.js";
+import { getImageOutputProfile, parseAspectRatio, type AspectRatio } from "./video-output-profile.js";
 
 export const IMAGE_CANDIDATE_JOB_TYPE = "image_candidate_generate";
 const HASH = /^[0-9a-f]{64}$/u;
@@ -32,6 +33,7 @@ interface ImageCandidateRequest {
   episodeId: string;
   assetId: string;
   prompt: string;
+  aspectRatio?: AspectRatio;
   derivedFromCandidateId?: string;
 }
 
@@ -53,13 +55,14 @@ function text(value: unknown, message: string, max = 255) {
 
 function requestPayload(value: unknown): ImageCandidateRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("图片生成任务参数无效");
-  const input = value as { episodeId?: unknown; assetId?: unknown; prompt?: unknown; derivedFromCandidateId?: unknown };
+  const input = value as { episodeId?: unknown; assetId?: unknown; prompt?: unknown; aspectRatio?: unknown; derivedFromCandidateId?: unknown };
   const episodeId = text(input.episodeId, "图片生成任务缺少有效的分集或资产 ID");
   const assetId = text(input.assetId, "图片生成任务缺少有效的分集或资产 ID");
   if (!/^[A-Za-z0-9_-]+$/.test(episodeId) || !/^[A-Za-z0-9_-]+$/.test(assetId)) {
     throw new Error("图片生成任务缺少有效的分集或资产 ID");
   }
   const request: ImageCandidateRequest = { episodeId, assetId, prompt: text(input.prompt, "图片生成提示词无效", 20_000) };
+  if (input.aspectRatio !== undefined) request.aspectRatio = parseAspectRatio(input.aspectRatio);
   if (input.derivedFromCandidateId !== undefined) {
     request.derivedFromCandidateId = text(input.derivedFromCandidateId, "父候选 ID 无效");
   }
@@ -122,10 +125,13 @@ export function imageGenerationRequestHash(input: {
   providerId: string;
   model: string;
   prompt: string;
+  aspectRatio?: AspectRatio;
   derivedFromCandidateId?: string;
 }) {
+  const explicitProfile = input.aspectRatio ? getImageOutputProfile(input.aspectRatio) : null;
   return sha256(JSON.stringify({
-    contract: input.derivedFromCandidateId ? "image-generation-request-v2" : "image-generation-request-v1",
+    contract: input.aspectRatio ? "image-generation-request-v3" :
+      input.derivedFromCandidateId ? "image-generation-request-v2" : "image-generation-request-v1",
     episodeId: input.episodeId,
     assetId: input.assetId,
     scriptVersionId: input.scriptVersionId,
@@ -134,7 +140,8 @@ export function imageGenerationRequestHash(input: {
     providerId: input.providerId,
     model: input.model,
     prompt: input.prompt,
-    size: IMAGE_GENERATION_SIZE,
+    ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+    size: explicitProfile?.size ?? IMAGE_GENERATION_SIZE,
     ...(input.derivedFromCandidateId ? { derivedFromCandidateId: input.derivedFromCandidateId } : {}),
   }));
 }
@@ -227,7 +234,8 @@ export function createImageCandidateJobHandler(
     const poll = setInterval(() => { if (context.isCancellationRequested()) controller.abort(); }, 50);
     let candidate: AssetCandidateRecord;
     try {
-      const generated = await generate({ prompt: task.prompt, config, signal: controller.signal });
+      const size = task.aspectRatio ? getImageOutputProfile(task.aspectRatio).size : IMAGE_GENERATION_SIZE;
+      const generated = await generate({ prompt: task.prompt, config, size, signal: controller.signal });
       if (controller.signal.aborted) throw new JobCancelledError();
       candidate = await withDataFileMutationLock(dataRoot, async () => {
         assertFrozenIdentity(database, config, context.job.id, task);
@@ -242,7 +250,7 @@ export function createImageCandidateJobHandler(
             model: task.model,
             promptHash,
             requestHash: task.requestHash,
-            size: IMAGE_GENERATION_SIZE,
+            size,
             outputIndex: 0,
             ...(generated.revisedPrompt ? { revisedPrompt: generated.revisedPrompt } : {}),
             ...(task.derivedFromCandidateId ? { derivedFromCandidateId: task.derivedFromCandidateId } : {}),
