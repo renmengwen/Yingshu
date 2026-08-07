@@ -35,7 +35,6 @@ function generatedScript() {
   return {
     title: "天空为什么是蓝色",
     summary: "用光的散射解释日常天空颜色。",
-    narration: `${first}\n\n${second}`,
     paragraphs: [{ text: first }, { text: second }],
     sourceSummary: [],
     risks: ["这是面向大众的简化解释"],
@@ -142,6 +141,7 @@ test("buildApp 完成关闭联网的方案生成、幂等、跨项目保护与�
     assert.equal(planResponse.statusCode, 200);
     const initial = planResponse.json().plan;
     assert.equal(initial.script.revision, 1);
+    assert.equal(initial.script.narration, initial.script.paragraphs.map((paragraph: { text: string }) => paragraph.text).join("\n\n"));
     assert.equal(initial.visual.revision, 1);
     assert.ok(initial.visual.visuals.every((visual: Record<string, unknown>) =>
       visual.generationStatus === "not_generated" && visual.currentCandidate === null));

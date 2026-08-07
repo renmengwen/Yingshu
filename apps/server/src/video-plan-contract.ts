@@ -7,7 +7,7 @@ import type { FrozenZhihuPlanInput } from "./zhihu-plan-whitelist.js";
 
 export const VIDEO_PLAN_JOB_TYPE = "video_plan_generate";
 export const VIDEO_PLAN_SYSTEM_CONTRACT_VERSION = "video-plan-system-v1";
-export const VIDEO_PLAN_PROMPT_VERSION = "video-plan-prompt-v1";
+export const VIDEO_PLAN_PROMPT_VERSION = "video-plan-prompt-v2";
 export const VIDEO_PLAN_WEB_CAPABILITY = "model-web-search-v1";
 
 export type VideoPlanStatus = "draft" | "preparing_sources" | "generating_script" | "planning_visuals" |
@@ -154,7 +154,11 @@ function stableId(prefix: string, snapshotHash: string, index: number, value: st
 
 export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSnapshot, sources: readonly VideoPlanSourceEvidence[] = []): VideoScriptContent {
   const row = planObject(value, "旁白方案输出");
-  exactFields(row, ["title", "summary", "narration", "paragraphs", "sourceSummary", "risks"], "旁白方案输出");
+  const requiredFields = ["title", "summary", "paragraphs", "sourceSummary", "risks"];
+  const allowedFields = [...requiredFields, "narration"];
+  if (Object.keys(row).some((key) => !allowedFields.includes(key)) || requiredFields.some((key) => !(key in row))) {
+    throw new VideoPlanError(422, "旁白方案输出字段无效");
+  }
   if (!Array.isArray(row.paragraphs) || row.paragraphs.length < 1 || row.paragraphs.length > 200) {
     throw new VideoPlanError(422, "旁白段落列表无效");
   }
@@ -164,10 +168,8 @@ export function parseGeneratedScript(value: unknown, snapshot: FrozenVideoPlanSn
     const paragraphText = planText(paragraph.text, "旁白段落正文", 20_000);
     return { id: stableId("paragraph", snapshot.snapshotHash, index, paragraphText), text: paragraphText };
   });
-  const narration = planText(row.narration, "完整旁白", 200_000);
-  if (narration.replace(/\s+/gu, "") !== paragraphs.map((item) => item.text).join("").replace(/\s+/gu, "")) {
-    throw new VideoPlanError(422, "完整旁白与段落正文不一致");
-  }
+  // 段落正文是模型唯一的旁白来源；完整旁白由服务端派生，避免模型分别改写两份正文。
+  const narration = paragraphs.map((item) => item.text).join("\n\n");
   const estimatedCharacters = [...narration.replace(/\s+/gu, "")].length;
   const maximumCharacters = Math.ceil(snapshot.input.targetDurationSeconds * 5.5);
   // 中文可朗读稿只做预算估算；过短内容会直接破坏“目标时长量级”的产品合同。
@@ -266,7 +268,7 @@ export function scriptPrompt(snapshot: FrozenVideoPlanSnapshot, sources: readonl
     "不得伪造人物、数字、引文、URL 或来源。短主题应扩写成目标时长量级的完整讲解，不重复观点凑字数。",
     "抖音方法画像只用于组织叙事，不得复制参考视频的原句或专有细节。评论洞察仅作受众解读，不得作为事实。来源边界、未核验说明和分析过程只写入 risks，不得写入 narration 或 paragraphs。",
     `系统合同版本：${snapshot.systemContractVersion}；输出版本：${VIDEO_PLAN_PROMPT_VERSION}。`,
-    "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"narration\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。sourceSummary 保持空数组，由系统根据冻结来源补齐；不得增加字段或 Markdown。",
+    "严格输出 JSON：{\"title\":\"\",\"summary\":\"\",\"paragraphs\":[{\"text\":\"\"}],\"sourceSummary\":[],\"risks\":[]}。paragraphs 是唯一旁白正文来源；每个 text 必须是完整旁白的连续分段，不得写摘要、提纲或画面说明。服务端会按段落顺序拼接完整旁白，因此不要输出 narration 字段。sourceSummary 保持空数组，由系统根据冻结来源补齐；不得增加字段或 Markdown。",
     "【全局补充】", snapshot.prompts.global.scriptInstructions || "（无）", "【项目补充】", snapshot.prompts.project.scriptInstructions || "（无）",
     "【视频补充】", snapshot.prompts.video.scriptInstructions || "（无）",
     "【当前操作】", JSON.stringify(currentOperation),

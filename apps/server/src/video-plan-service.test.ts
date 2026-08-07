@@ -54,7 +54,7 @@ function scriptOutput() {
   const second = "蓝光波长较短，更容易被空气分子散向各个方向，因此我们从地面望去，视野中会接收到更多蓝色散射光。太阳接近地平线时，光线穿过的大气路径更长，蓝光大量散开，留下的红橙色光更显眼，这也解释了日出日落常见的暖色。";
   return {
     title: "天空为什么是蓝色", summary: "用光的散射解释日常天空颜色。",
-    narration: `${first}\n\n${second}`, paragraphs: [{ text: first }, { text: second }],
+    paragraphs: [{ text: first }, { text: second }],
     sourceSummary: [], risks: ["这里只给出面向大众的简化解释"],
   };
 }
@@ -353,7 +353,7 @@ test("未联网来源摘要和超出目标时长预算的旁白都拒绝持久�
     ["offline-fake-source", { ...scriptOutput(), sourceSummary: ["https://example.com/虚假来源"] }, /未联网核验/u],
     ["overlong-script", (() => {
       const text = "长".repeat(331);
-      return { ...scriptOutput(), narration: text, paragraphs: [{ text }] };
+      return { ...scriptOutput(), paragraphs: [{ text }] };
     })(), /最多允许 330 字/u],
   ] as const) {
     const value = await fixture();
