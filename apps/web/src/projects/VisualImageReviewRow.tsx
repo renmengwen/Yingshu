@@ -28,6 +28,28 @@ function CandidateDetails({ candidate }: { candidate: VideoImageCandidate }) {
   </details>;
 }
 
+export function ImageLightbox({ visual, candidate, open, triggerRef, onOpenChange }: {
+  visual: VideoImageVisual;
+  candidate: VideoImageCandidate | null;
+  open: boolean;
+  triggerRef: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const visualNumber = String(visual.order + 1).padStart(2, "0");
+
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="w-[min(calc(100vw-1rem),90rem)] overflow-hidden bg-[var(--bg-inset)]" showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); closeRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus(); }}>
+      <DialogHeader className="bg-[var(--bg-inset)] px-4 py-4 pr-16 sm:px-6">
+        <DialogTitle>画面 {visualNumber} · {candidate ? candidateIdentity(candidate) : "图片预览"}</DialogTitle>
+        <DialogDescription>{candidate?.currentCompatible ? "当前候选" : "历史候选，仅供查看"}</DialogDescription>
+        <Button ref={closeRef} className="absolute right-2 top-2" variant="ghost" type="button" onClick={() => onOpenChange(false)}>关闭<span className="sr-only">大图预览</span></Button>
+      </DialogHeader>
+      {candidate ? <div className="flex min-h-[min(70vh,52rem)] items-center justify-center bg-[var(--bg-inset)] p-3 sm:p-8"><img className="max-h-[calc(100dvh-10rem)] max-w-full object-contain" src={candidate.previewUrl} alt={`画面 ${visualNumber} 大图：${candidateIdentity(candidate)}`} /></div> : <p className="p-8 text-center text-sm text-[var(--fg-secondary)]">尚无可预览的图片候选。</p>}
+    </DialogContent>
+  </Dialog>;
+}
+
 export function VisualImageReviewRow({ visual, open, triggerRef, productionAllowed, busyAction, onOpenChange, onGenerate, onUpload, onApprove }: {
   visual: VideoImageVisual;
   open: boolean;
@@ -47,8 +69,7 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
   const [confirmClose, setConfirmClose] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const initialFocusRef = useRef<HTMLButtonElement>(null);
-  const lightboxTriggerRef = useRef<HTMLButtonElement>(null);
-  const lightboxCloseRef = useRef<HTMLButtonElement>(null);
+  const lightboxTriggerRef = useRef<HTMLElement>(null);
   const busy = busyAction !== null;
   const generating = busyAction === `generate:${visual.id}`;
   const uploading = busyAction === `upload:${visual.id}`;
@@ -62,7 +83,14 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
     if (!open) return;
     setSelectedId(approvedId);
     setPreviewId(approvedId ?? current[0]?.id ?? historical[0]?.id ?? null);
+    setLightboxOpen(false);
   }, [open, approvedId, visual.id]);
+
+  function openLightbox(candidate: VideoImageCandidate, trigger?: HTMLElement) {
+    setPreviewId(candidate.id);
+    if (trigger) lightboxTriggerRef.current = trigger;
+    setLightboxOpen(true);
+  }
 
   function requestClose() {
     if (dirty && !approving) setConfirmClose(true);
@@ -79,23 +107,24 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
           <DialogDescription>{visual.narrationSummary} · 当前 {current.length} 个可用候选{historical.length ? ` · ${historical.length} 个历史候选` : ""}</DialogDescription>
           <Button ref={initialFocusRef} className="absolute right-2 top-2" variant="ghost" type="button" onClick={requestClose}>关闭<span className="sr-only">画面候选详情</span></Button>
         </DialogHeader>
-        <div className="grid min-w-0 gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-4">
-            <section><h4 className="text-sm font-semibold">完整中文描述</h4><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--fg-secondary)]">{visual.description}</p></section>
-            <section><h4 className="text-sm font-semibold">当前画面最终 Prompt</h4><p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[var(--fg-secondary)]">{visual.prompt || "未设置"}</p></section>
-            <section><h4 className="text-sm font-semibold">当前画面负面 Prompt</h4><p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[var(--fg-secondary)]">{visual.negativePrompt || "未设置"}</p></section>
-            {visual.generationState?.errorSummary ? <p className="text-sm font-semibold text-[var(--status-danger)]" role="alert">生成失败：{visual.generationState.errorSummary}</p> : null}
-            {disabledReason ? <p className="text-sm text-[var(--status-warning)]">{disabledReason}</p> : null}
-          </div>
-          <div className="min-w-0 space-y-4">
-            {preview ? <figure className="min-w-0"><div className="mx-auto aspect-[9/16] max-h-[46vh] overflow-hidden bg-[var(--bg-inset)]"><img className="h-full w-full object-contain" src={preview.previewUrl} alt={`画面 ${String(visual.order + 1).padStart(2, "0")}候选大图：${candidateIdentity(preview)}`} /></div><figcaption className="mt-2 text-center text-xs text-[var(--fg-secondary)]">放大查看 · {candidateIdentity(preview)}</figcaption></figure> : <p className="min-h-32 border border-dashed border-[var(--border-strong)] bg-[var(--bg-inset)] p-5 text-sm text-[var(--fg-secondary)]">尚无图片候选。可重新生成或上传本地图片。</p>}
-            {current.length ? <div><h4 className="text-sm font-semibold">选择一个候选</h4><p className="mt-1 text-xs leading-5 text-[var(--fg-secondary)]">选择只保留在当前弹框；点击“批准所选图片”后才会写入审核结果。</p><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{current.map((candidate, index) => <article key={candidate.id} className={`min-w-0 border p-2 ${selectedId === candidate.id ? "border-[var(--accent)] bg-[var(--surface-selected)]" : "border-[var(--border-subtle)]"}`}>
-              <button className="block w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={() => setPreviewId(candidate.id)}><img className="aspect-[9/16] w-full bg-[var(--bg-inset)] object-cover" src={candidate.previewUrl} alt={`候选 ${index + 1}，点击放大查看`} /></button>
+        <div className="grid min-w-0 gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,.85fr)]">
+          <div className="min-w-0 space-y-5">
+            <section className="space-y-3"><div className="flex items-end justify-between gap-3"><div><h4 className="text-sm font-semibold">候选预览</h4><p className="mt-1 text-xs text-[var(--fg-secondary)]">点击图片查看大图，点击按钮选择要批准的候选。</p></div>{preview ? <Badge variant={preview.approved ? "default" : "outline"}>{preview.approved ? "已批准" : "待审核"}</Badge> : null}</div>
+              {preview ? <figure><button className="group relative mx-auto block aspect-[9/16] h-[min(52vh,34rem)] max-h-full max-w-full overflow-hidden bg-[var(--bg-inset)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={(event) => openLightbox(preview, event.currentTarget)}><img className="h-full w-full object-contain" src={preview.previewUrl} alt={`画面 ${String(visual.order + 1).padStart(2, "0")}候选大图：${candidateIdentity(preview)}`} /><span className="pointer-events-none absolute inset-x-3 bottom-3 bg-black/65 px-3 py-2 text-center text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">点击查看大图</span></button><figcaption className="mt-2 text-center text-xs text-[var(--fg-secondary)]">放大查看 · {candidateIdentity(preview)}</figcaption></figure> : <p className="min-h-32 border border-dashed border-[var(--border-strong)] bg-[var(--bg-inset)] p-5 text-sm text-[var(--fg-secondary)]">尚无图片候选。可重新生成或上传本地图片。</p>}
+            </section>
+            {current.length ? <section className="space-y-3"><div><h4 className="text-sm font-semibold">选择一个候选</h4><p className="mt-1 text-xs leading-5 text-[var(--fg-secondary)]">选择只保留在当前弹框；点击“批准所选图片”后才会写入审核结果。</p></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{current.map((candidate, index) => <article key={candidate.id} className={`min-w-0 border p-2 ${selectedId === candidate.id ? "border-[var(--accent)] bg-[var(--surface-selected)]" : "border-[var(--border-subtle)]"}`}>
+              <button className="group relative block w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={(event) => openLightbox(candidate, event.currentTarget)}><img className="aspect-[9/16] w-full bg-[var(--bg-inset)] object-cover" src={candidate.previewUrl} alt={`候选 ${index + 1}，点击查看大图`} /><span className="pointer-events-none absolute inset-x-1 bottom-1 bg-black/65 px-1 py-1 text-center text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">查看大图</span></button>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-semibold">候选 {index + 1}</span><Badge variant={candidate.approved ? "default" : "outline"}>{candidate.approved ? "已批准" : "待审核"}</Badge></div>
               <Button className="mt-2 w-full" size="sm" variant={selectedId === candidate.id ? "default" : "outline"} type="button" disabled={busy || candidate.approved} onClick={() => { setSelectedId(candidate.id); setPreviewId(candidate.id); }}>{candidate.approved ? "当前已批准" : selectedId === candidate.id ? "已选择" : "选择候选"}</Button>
-            </article>)}</div></div> : null}
+            </article>)}</div></section> : null}
+            {historical.length ? <details className="border-t border-[var(--border-subtle)] pt-3"><summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">历史 / 已失效候选（{historical.length}）</summary><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{historical.map((candidate, index) => <button key={candidate.id} className="border border-[var(--border-subtle)] p-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={(event) => openLightbox(candidate, event.currentTarget)}><img className="aspect-[9/16] w-full object-cover opacity-70" src={candidate.previewUrl} alt={`历史候选 ${index + 1}，点击查看大图`} /><span className="mt-2 block text-xs">历史候选 {index + 1}</span></button>)}</div></details> : null}
+          </div>
+          <div className="min-w-0 space-y-5">
+            <section className="space-y-2"><h4 className="text-sm font-semibold">完整中文描述</h4><p className="whitespace-pre-wrap text-sm leading-6 text-[var(--fg-secondary)]">{visual.description}</p></section>
+            <section className="space-y-3"><div><h4 className="text-sm font-semibold">当前画面最终 Prompt</h4><p className="mt-1 text-xs text-[var(--fg-secondary)]">当前画面修订的冻结内容</p></div><div className="max-h-44 overflow-y-auto whitespace-pre-wrap break-words bg-[var(--surface-secondary)] p-3 font-mono text-xs leading-5 text-[var(--fg-secondary)]">{visual.prompt || "未设置"}</div><div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words bg-[var(--surface-secondary)] p-3 font-mono text-xs leading-5 text-[var(--fg-secondary)]"><span className="mb-1 block font-sans font-semibold text-[var(--fg-primary)]">当前画面负面 Prompt</span>{visual.negativePrompt || "未设置"}</div></section>
             {preview ? <CandidateDetails candidate={preview} /> : null}
-            {historical.length ? <details className="border-t border-[var(--border-subtle)]"><summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">历史 / 已失效候选（{historical.length}）</summary><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{historical.map((candidate, index) => <button key={candidate.id} className="border border-[var(--border-subtle)] p-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" type="button" onClick={() => setPreviewId(candidate.id)}><img className="aspect-[9/16] w-full object-cover opacity-70" src={candidate.previewUrl} alt={`历史候选 ${index + 1}，点击放大查看`} /><span className="mt-2 block text-xs">历史候选 {index + 1}</span></button>)}</div></details> : null}
+            {visual.generationState?.errorSummary ? <p className="text-sm font-semibold text-[var(--status-danger)]" role="alert">生成失败：{visual.generationState.errorSummary}</p> : null}
+            {disabledReason ? <p className="text-sm text-[var(--status-warning)]">{disabledReason}</p> : null}
           </div>
         </div>
         <DialogFooter className="sm:items-center sm:justify-between">
@@ -105,19 +134,9 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
           </div>
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><Button variant="outline" type="button" onClick={requestClose}>取消</Button><Button type="button" disabled={!selected || selected.approved || !productionAllowed || busy} onClick={() => selected && onApprove(selected.id)}>{approving ? "正在批准…" : selected ? selected.approved ? "当前已批准" : "批准所选图片" : "先选择候选"}</Button></div>
         </DialogFooter>
-        <Button ref={lightboxTriggerRef} className="mx-4 mb-4 sm:mx-6" variant="outline" type="button" disabled={!preview} onClick={() => setLightboxOpen(true)}>查看大图</Button>
       </DialogContent>
     </Dialog>
-    <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-      <DialogContent className="w-[min(calc(100vw-1rem),90rem)] bg-[var(--bg-inset)]" showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); lightboxCloseRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); lightboxTriggerRef.current?.focus(); }}>
-        <DialogHeader className="bg-[var(--bg-inset)] pr-16">
-          <DialogTitle>画面 {String(visual.order + 1).padStart(2, "0")} · {preview ? candidateIdentity(preview) : "图片预览"}</DialogTitle>
-          <DialogDescription>{preview?.currentCompatible ? "当前候选" : "历史候选，仅供查看"}</DialogDescription>
-          <Button ref={lightboxCloseRef} className="absolute right-2 top-2" variant="ghost" type="button" onClick={() => setLightboxOpen(false)}>关闭<span className="sr-only">大图预览</span></Button>
-        </DialogHeader>
-        {preview ? <div className="flex min-h-[60vh] items-center justify-center p-3 sm:p-6"><img className="max-h-[calc(100dvh-11rem)] max-w-full object-contain" src={preview.previewUrl} alt={`画面 ${String(visual.order + 1).padStart(2, "0")}大图：${candidateIdentity(preview)}`} /></div> : null}
-      </DialogContent>
-    </Dialog>
+    <ImageLightbox visual={visual} candidate={preview} open={lightboxOpen} triggerRef={lightboxTriggerRef} onOpenChange={setLightboxOpen} />
     <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>放弃未提交的候选选择？</AlertDialogTitle><AlertDialogDescription>当前选择只保留在本地，关闭后将恢复为已批准候选或未选择状态。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>继续选择</AlertDialogCancel><AlertDialogAction onClick={() => { setConfirmClose(false); onOpenChange(false); }}>放弃并关闭</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
   </>;
 }
