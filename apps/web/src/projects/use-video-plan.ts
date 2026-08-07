@@ -69,7 +69,7 @@ export function useVideoPlan(projectId: string, videoId: string) {
     return () => window.clearInterval(timer);
   }, [job, refresh]);
 
-  async function perform(message: string, operation: () => Promise<{ message?: string; plan?: VideoPlan; [key: string]: unknown }>) {
+  async function perform(message: string, operation: () => Promise<{ message?: string; plan?: VideoPlan; [key: string]: unknown }>, onSuccess?: () => void) {
     if (busyRef.current) return;
     busyRef.current = true;
     setActionState("loading");
@@ -77,6 +77,7 @@ export function useVideoPlan(projectId: string, videoId: string) {
     try {
       const result = await operation();
       if (result.plan) setPlan(result.plan);
+      onSuccess?.();
       await refresh(true);
       setActionState("success");
       setStatus(result.message || "操作已完成。");
@@ -108,11 +109,11 @@ export function useVideoPlan(projectId: string, videoId: string) {
       snapshotId: plan.snapshotId, baseRevision: plan.visual.revision, scriptRevisionId: plan.script.id, visuals,
     }));
   };
-  const approve = () => {
+  const approve = (onApproved?: () => void) => {
     if (!plan) return Promise.resolve();
     return perform("正在批准当前旁白与画面方案…", () => projectApi.approvePlan(projectId, videoId, {
       snapshotId: plan.snapshotId, scriptRevisionId: plan.script.id, visualRevisionId: plan.visual.id,
-    }));
+    }), onApproved);
   };
 
   return {

@@ -45,7 +45,10 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
   const [selectedId, setSelectedId] = useState<string | null>(approvedId);
   const [previewId, setPreviewId] = useState<string | null>(approvedId ?? current[0]?.id ?? null);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const initialFocusRef = useRef<HTMLButtonElement>(null);
+  const lightboxTriggerRef = useRef<HTMLButtonElement>(null);
+  const lightboxCloseRef = useRef<HTMLButtonElement>(null);
   const busy = busyAction !== null;
   const generating = busyAction === `generate:${visual.id}`;
   const uploading = busyAction === `upload:${visual.id}`;
@@ -102,6 +105,17 @@ export function VisualImageReviewRow({ visual, open, triggerRef, productionAllow
           </div>
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><Button variant="outline" type="button" onClick={requestClose}>取消</Button><Button type="button" disabled={!selected || selected.approved || !productionAllowed || busy} onClick={() => selected && onApprove(selected.id)}>{approving ? "正在批准…" : selected ? selected.approved ? "当前已批准" : "批准所选图片" : "先选择候选"}</Button></div>
         </DialogFooter>
+        <Button ref={lightboxTriggerRef} className="mx-4 mb-4 sm:mx-6" variant="outline" type="button" disabled={!preview} onClick={() => setLightboxOpen(true)}>查看大图</Button>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+      <DialogContent className="w-[min(calc(100vw-1rem),90rem)] bg-[var(--bg-inset)]" showCloseButton={false} onOpenAutoFocus={(event) => { event.preventDefault(); lightboxCloseRef.current?.focus(); }} onCloseAutoFocus={(event) => { event.preventDefault(); lightboxTriggerRef.current?.focus(); }}>
+        <DialogHeader className="bg-[var(--bg-inset)] pr-16">
+          <DialogTitle>画面 {String(visual.order + 1).padStart(2, "0")} · {preview ? candidateIdentity(preview) : "图片预览"}</DialogTitle>
+          <DialogDescription>{preview?.currentCompatible ? "当前候选" : "历史候选，仅供查看"}</DialogDescription>
+          <Button ref={lightboxCloseRef} className="absolute right-2 top-2" variant="ghost" type="button" onClick={() => setLightboxOpen(false)}>关闭<span className="sr-only">大图预览</span></Button>
+        </DialogHeader>
+        {preview ? <div className="flex min-h-[60vh] items-center justify-center p-3 sm:p-6"><img className="max-h-[calc(100dvh-11rem)] max-w-full object-contain" src={preview.previewUrl} alt={`画面 ${String(visual.order + 1).padStart(2, "0")}大图：${candidateIdentity(preview)}`} /></div> : null}
       </DialogContent>
     </Dialog>
     <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>放弃未提交的候选选择？</AlertDialogTitle><AlertDialogDescription>当前选择只保留在本地，关闭后将恢复为已批准候选或未选择状态。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>继续选择</AlertDialogCancel><AlertDialogAction onClick={() => { setConfirmClose(false); onOpenChange(false); }}>放弃并关闭</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>

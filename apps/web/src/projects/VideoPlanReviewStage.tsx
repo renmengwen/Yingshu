@@ -10,7 +10,7 @@ import { NarrationReview } from "./video-plan-review/NarrationReview";
 import { PlanActionBar, PlanOverview, SourcesRisksDialog } from "./video-plan-review/PlanReviewSupport";
 import { VisualReview } from "./video-plan-review/VisualReview";
 
-export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVideoPlan> }) {
+export function VideoPlanReviewStage({ state, onApproved }: { state: ReturnType<typeof useVideoPlan>; onApproved: () => void }) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [paragraphs, setParagraphs] = useState<VideoScriptParagraph[]>([]);
@@ -74,7 +74,7 @@ export function VideoPlanReviewStage({ state }: { state: ReturnType<typeof useVi
   }
 
   function approve() {
-    if (gates.approve.allowed) void state.approve();
+    if (gates.approve.allowed) void state.approve(onApproved);
   }
 
   return <section className="p-5 md:p-8" aria-labelledby="plan-stage-heading">
