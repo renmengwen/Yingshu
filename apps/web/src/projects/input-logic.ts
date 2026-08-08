@@ -6,6 +6,34 @@ import {
   type VideoInputDraft,
 } from "./types";
 
+export type CreativeInputMode = VideoInputDraft["inputMode"] | "douyin" | "zhihu";
+
+type SavedSourceSelection = {
+  snapshotId: string;
+  updatedAt: number;
+};
+
+/**
+ * 外部来源不属于主题/正文 inputMode；输入页恢复时从当前有效选择推导入口方式。
+ * 两种来源同时存在时，以最近保存的选择为准，避免回到页面后出现与最近操作不一致的入口。
+ */
+export function restoredCreativeInputMode(input: VideoInputDraft, sources: {
+  douyin?: SavedSourceSelection;
+  douyinSnapshotId?: string | null;
+  zhihu?: SavedSourceSelection;
+  zhihuSnapshotId?: string | null;
+}): CreativeInputMode {
+  const candidates: Array<{ mode: "douyin" | "zhihu"; updatedAt: number }> = [];
+  if (sources.douyin && sources.douyinSnapshotId === sources.douyin.snapshotId) {
+    candidates.push({ mode: "douyin", updatedAt: sources.douyin.updatedAt });
+  }
+  if (sources.zhihu && sources.zhihuSnapshotId === sources.zhihu.snapshotId) {
+    candidates.push({ mode: "zhihu", updatedAt: sources.zhihu.updatedAt });
+  }
+  candidates.sort((a, b) => b.updatedAt - a.updatedAt);
+  return candidates[0]?.mode ?? input.inputMode;
+}
+
 export const INPUT_LIMITS = {
   topicCodePoints: 200,
   bodyBytes: 128 * 1024,

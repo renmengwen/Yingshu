@@ -145,16 +145,30 @@ export function VideoProductionSettingsDialog({ disabled, settings, onApply }: V
             <FieldSet disabled={disabled}>
               <FieldLegend className="mb-0" variant="label">生图画风</FieldLegend>
               <FieldDescription id="dialog-visual-style-help">选择基础画风；更细的色彩、构图和禁用项可在下方补充。</FieldDescription>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-describedby="dialog-visual-style-help" aria-label="生图画风预设">
+              <RadioGroup
+                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+                name="dialog-visual-style"
+                aria-describedby="dialog-visual-style-help"
+                value={visualStylePreset ?? "none"}
+                onValueChange={(value) => setDraft({
+                  ...draft,
+                  visualInstructions: applyVisualStylePreset(
+                    draft.visualInstructions,
+                    value === "none" ? null : value as typeof VISUAL_STYLE_PRESETS[number]["id"],
+                  ),
+                })}
+              >
                 {VISUAL_STYLE_PRESETS.map((preset) => (
-                  <Button key={preset.id} type="button" variant="outline" className={`${segmentedOptionClass} h-auto whitespace-normal py-2`} aria-pressed={visualStylePreset === preset.id} data-state={visualStylePreset === preset.id ? "checked" : "unchecked"} onClick={() => setDraft({ ...draft, visualInstructions: applyVisualStylePreset(draft.visualInstructions, preset.id) })}>
-                    {preset.label}
-                  </Button>
+                  <FieldLabel className={`${segmentedOptionClass} h-auto py-2`} key={preset.id}>
+                    <RadioGroupItem className={hiddenRadioClass} value={preset.id} />
+                    <span>{preset.label}</span>
+                  </FieldLabel>
                 ))}
-                <Button type="button" variant="outline" className={`${segmentedOptionClass} h-auto whitespace-normal py-2 sm:col-span-2`} aria-pressed={visualStylePreset === null} data-state={visualStylePreset === null ? "checked" : "unchecked"} onClick={() => setDraft({ ...draft, visualInstructions: applyVisualStylePreset(draft.visualInstructions, null) })}>
-                  不使用预设
-                </Button>
-              </div>
+                <FieldLabel className={`${segmentedOptionClass} h-auto py-2 sm:col-span-2`}>
+                  <RadioGroupItem className={hiddenRadioClass} value="none" />
+                  <span>不使用预设</span>
+                </FieldLabel>
+              </RadioGroup>
             </FieldSet>
             <div className="grid gap-4 bg-[var(--bg-subtle)] p-4 sm:grid-cols-2">
               <div>

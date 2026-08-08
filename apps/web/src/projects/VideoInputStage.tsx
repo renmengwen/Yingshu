@@ -12,6 +12,7 @@ import { EyeIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { VideoInputDraft } from "./types";
 import { useVideoInput } from "./use-video-input";
+import { restoredCreativeInputMode, type CreativeInputMode } from "./input-logic";
 import {
   videoPlanLaunchBlockReason,
   VideoPlanLauncher,
@@ -36,7 +37,6 @@ import { zhihuPlanLaunchBlockReason } from "./zhihu-analysis/logic";
 import { useZhihuAnalysis } from "./zhihu-analysis/use-zhihu-analysis";
 
 const segmentClass = segmentedOptionClass;
-type CreativeInputMode = VideoInputDraft["inputMode"] | "douyin" | "zhihu";
 
 export function VideoInputStage({
   projectId,
@@ -112,8 +112,16 @@ export function VideoInputContent({
 }) {
   const [selectedCreativeInputMode, setSelectedCreativeInputMode] =
     useState<CreativeInputMode>();
+  const restoredMode = state.draft
+    ? restoredCreativeInputMode(state.draft, {
+        douyin: douyinState?.summary?.selection ?? undefined,
+        douyinSnapshotId: douyinState?.summary?.snapshot?.id,
+        zhihu: zhihuState?.summary?.selection ?? undefined,
+        zhihuSnapshotId: zhihuState?.summary?.snapshot?.id,
+      })
+    : undefined;
   const creativeInputMode =
-    selectedCreativeInputMode ?? state.draft?.inputMode ?? "topic";
+    selectedCreativeInputMode ?? restoredMode ?? state.draft?.inputMode ?? "topic";
   const update = <K extends keyof VideoInputDraft>(
     key: K,
     value: VideoInputDraft[K],

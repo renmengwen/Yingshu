@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -17,6 +18,13 @@ import {
 } from "../src/projects/visual-style-presets.ts";
 import { instructionLimitMessage } from "../src/projects/VideoProductionSettingsDialog.tsx";
 import { VideoStageNavigation } from "../src/projects/VideoStageNavigation.tsx";
+
+test("生图画风与其他制作设置复用 RadioGroup 回显选中预设", () => {
+  const source = readFileSync(new URL("../src/projects/VideoProductionSettingsDialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /name="dialog-visual-style"/u);
+  assert.match(source, /value=\{visualStylePreset \?\? "none"\}/u);
+  assert.match(source, /<RadioGroupItem className=\{hiddenRadioClass\} value=\{preset\.id\}/u);
+});
 
 test("项目与视频路由可安全编码并从刷新地址恢复", () => {
   assert.equal(projectPath("项目/一"), "/projects/%E9%A1%B9%E7%9B%AE%2F%E4%B8%80");
