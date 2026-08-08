@@ -17,6 +17,19 @@
 - 开发过程中发现死逻辑或无调用函数时，验证其不存在有效调用和行为依赖后直接删除，不保留无意义的兼容壳。
 - 计划完成、单个 Task/Phase 完成、Review、提交、推送和上下文切换都只是内部 checkpoint；总目标完成或出现用户定义的真实阻塞前，Coordinator 自动进入下一个 ready Task。
 
+## 本地 ASR 启动方式
+
+PowerShell 执行以下命令启动本机 CPU FunASR（SenseVoiceSmall）：
+
+```powershell
+$runtime = 'D:\YingshuRuntime\funasr-cpu'
+$env:MODELSCOPE_CACHE = "$runtime\models"
+$env:HF_HOME = "$runtime\models\huggingface"
+Start-Process "$runtime\.venv\Scripts\funasr-server.exe" -ArgumentList '--host','127.0.0.1','--port','8000','--device','cpu','--model','sensevoice','--hub','ms' -WorkingDirectory $runtime -WindowStyle Hidden
+```
+
+就绪检查：`(Invoke-WebRequest 'http://127.0.0.1:8000/docs' -UseBasicParsing).StatusCode` 应返回 `200`。服务地址为 `http://127.0.0.1:8000/v1`，重启电脑后需手动启动。
+
 ## 全栈模块化与样式硬约束
 
 - 前端样式以 Tailwind CSS utility 为第一选择；`styles.css` 只保留全局 token、reset/base、确有跨页面复用价值且 utility 无法清晰表达的少量规则。禁止继续用大段页面级手写 CSS 堆叠工作区、表单、资产卡、候选卡或响应式布局。
