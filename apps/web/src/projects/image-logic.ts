@@ -90,6 +90,11 @@ export function imageCandidateAspectRatio(candidate: Pick<VideoImageCandidate, "
   return `${candidate.width} / ${candidate.height}`;
 }
 
+/** 配图列表只清理模型/抽取器混入的独立行首页码，正文中的正常数字保持不变。 */
+export function displayNarrationSummary(value: string) {
+  return value.replace(/(^|\n)\s*\d{1,4}(?=\s)/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 export function imageBatchSummary(batch: VideoImageBatch | null) {
   if (!batch) return "尚未创建图片批次。";
   const status = ({ queued: "排队中", running: "生成中", succeeded: "已完成", failed: "生成失败", cancelled: "已中断", partial: "部分完成" } as const)[batch.status];
