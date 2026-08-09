@@ -9,7 +9,7 @@ import {
 } from "./subtitle-timeline.js";
 import { systemSpeechInputHash } from "./tts-provider.js";
 
-test("中文旁白按标点和 Unicode code point 拆成最多两行短句且不丢字", () => {
+test("中文旁白按标点和 Unicode code point 拆成单行短句且不丢字", () => {
   const punctuated = "墓门开了。别回头！火把突然熄灭，身后传来脚步声。";
   const units = splitNarration(punctuated);
   assert.equal(units.map((unit) => unit.speechText).join(""), punctuated);
@@ -17,15 +17,15 @@ test("中文旁白按标点和 Unicode code point 拆成最多两行短句且不
   assert.equal(units.at(-1)?.speechText, "火把突然熄灭，身后传来脚步声。");
   for (const unit of units) {
     const lines = unit.subtitleText.split("\n");
-    assert.ok(lines.length <= 2);
+    assert.equal(lines.length, 1);
     assert.ok(lines.every((line) => line.length > 0 && [...line].length <= SUBTITLE_LINE_LIMIT));
   }
 
   const noPunctuation = "甲".repeat(35) + "𠮷";
   const fallback = splitNarration(noPunctuation);
   assert.equal(fallback.map((unit) => unit.speechText).join(""), noPunctuation);
-  assert.deepEqual(fallback.map((unit) => [...unit.speechText].length), [32, 4]);
-  assert.ok(fallback.every((unit) => unit.subtitleText.split("\n").length <= 2));
+  assert.deepEqual(fallback.map((unit) => [...unit.speechText].length), [16, 16, 4]);
+  assert.ok(fallback.every((unit) => unit.subtitleText.split("\n").length === 1));
   assert.deepEqual(splitNarration("  \n\t  "), []);
 });
 
@@ -48,7 +48,7 @@ test("拆句合同版本进入 System.Speech 输入身份", () => {
   const input = { text: "同一句", scriptVersionId: "script", contentHash: "a".repeat(64), voice: "voice", rate: 0 };
   assert.notEqual(
     systemSpeechInputHash({ ...input, contractVersion: "subtitle-timeline-v1" }),
-    systemSpeechInputHash({ ...input, contractVersion: "subtitle-timeline-v2" }),
+    systemSpeechInputHash({ ...input, contractVersion: "subtitle-timeline-v3" }),
   );
 });
 
@@ -60,7 +60,7 @@ test("splitNarration merges quote-only punctuation into neighboring speakable te
   assert.equal(units.some((unit) => unit.speechText === "\""), false);
   for (const unit of units) {
     const lines = unit.subtitleText.split("\n");
-    assert.ok(lines.length <= 2);
+    assert.equal(lines.length, 1);
     assert.ok(lines.every((line) => line.length > 0 && [...line].length <= SUBTITLE_LINE_LIMIT));
   }
 });

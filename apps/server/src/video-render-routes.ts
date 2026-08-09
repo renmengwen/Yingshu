@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { ProjectVideoStoreError } from "./project-video-store.js";
 import { createVideoProjectPackage } from "./video-project-package.js";
 import {
-  cancelVideoRender, enqueueVideoRender, getVideoRenderWorkspace, openCurrentFinalVideo, VideoRenderError,
+  cancelVideoRender, enqueueVideoRender, getVideoRenderWorkspace, openCurrentFinalVideo, openFinalVideo, VideoRenderError,
   videoRenderIdentity,
 } from "./video-render-store.js";
 import { VideoVisualReviewError } from "./video-visual-review.js";
@@ -53,8 +53,8 @@ export function parseVideoRange(value: string | undefined, bytes: number) {
 }
 
 async function sendVideo(database: DatabaseSync, dataRoot: string, params: Params,
-  rangeHeader: string | undefined, download: boolean, reply: FastifyReply) {
-  const result = await openCurrentFinalVideo(database, dataRoot, params.projectId, params.videoId);
+  rangeHeader: string | undefined, download: boolean, reply: FastifyReply, runId?: string) {
+  const result = await openFinalVideo(database, dataRoot, params.projectId, params.videoId, runId);
   try {
     let range;
     try { range = parseVideoRange(rangeHeader, result.bytes); }
@@ -109,6 +109,22 @@ export async function registerVideoRenderRoutes(app: FastifyInstance, options: {
   app.get<{ Params: Params; Headers: { range?: string } }>(`${base}/final-video/download`, async (request, reply) => {
     try { return await sendVideo(options.database, options.dataRoot, request.params, request.headers.range, true, reply); }
     catch (error) { return sendError(error, reply); }
+  });
+  app.get<{ Params: Params; Querystring: { runId?: string }; Headers: { range?: string } }>(`${base}/previous-final-video`, async (request, reply) => {
+      try {
+        if (!request.query.runId || !/^[A-Za-z0-9_-]+$/u.test(request.query.runId)) {
+          throw new VideoRenderError(400, "旧版本视频标识无效");
+        }
+        return await sendVideo(options.database, options.dataRoot, request.params, request.headers.range, false, reply, request.query.runId);
+      } catch (error) { return sendError(error, reply); }
+    });
+  app.get<{ Params: Params; Querystring: { runId?: string }; Headers: { range?: string } }>(`${base}/previous-final-video/download`, async (request, reply) => {
+      try {
+        if (!request.query.runId || !/^[A-Za-z0-9_-]+$/u.test(request.query.runId)) {
+          throw new VideoRenderError(400, "旧版本视频标识无效");
+        }
+        return await sendVideo(options.database, options.dataRoot, request.params, request.headers.range, true, reply, request.query.runId);
+      } catch (error) { return sendError(error, reply); }
   });
   app.post<{ Params: Params; Body: unknown }>(`${base}/project-package`, async (request, reply) => {
     try {

@@ -49,6 +49,7 @@ export interface VideoRenderWorkspace {
     errorMessage: string | null;
   };
   final: null | { fileHash: string; bytes: number; durationMs: number; width: number; height: number; fps: number; videoCodec: string; audioCodec: string; pixelFormat: string };
+  previousFinal: null | { id: string; runId: string; fileHash: string; bytes: number; createdAt: number; renderIdentityHash: string; stale: true; mediaInfo: Record<string, unknown> };
 }
 
 const MOTIONS = new Set<VideoMotionKind>(["still", "zoom_in", "zoom_out", "pan_left", "pan_right"]);
@@ -200,6 +201,7 @@ export function parseVideoRenderWorkspace(value: unknown, expected: { projectId:
       estimatedChunks: count(readinessInput.estimatedChunks, "预计分片数"),
     },
     render,
+    previousFinal: (input.previousFinal ?? null) as VideoRenderWorkspace["previousFinal"],
     final: finalInput && mediaInfo ? { fileHash: hash(finalInput.fileHash, "最终视频哈希"), bytes: count(finalInput.bytes, "最终视频字节数"), durationMs: count(mediaInfo.durationMs, "最终视频时长"), width: count(mediaInfo.width, "最终视频宽度"), height: count(mediaInfo.height, "最终视频高度"), fps: count(mediaInfo.fps, "最终视频帧率"), videoCodec: text(mediaInfo.videoCodec, "视频编码"), audioCodec: text(mediaInfo.audioCodec, "音频编码"), pixelFormat: text(mediaInfo.pixelFormat, "像素格式") } : null,
   };
 }

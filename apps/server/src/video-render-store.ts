@@ -68,7 +68,18 @@ interface FinalRow {
   manifest_relative_path: string; manifest_bytes: number; manifest_hash: string; ffmpeg_version: string; created_at: number;
 }
 
-function runRecord(database: DatabaseSync, row: RunRow | undefined) {
+function latestPreviousFinal(database: DatabaseSync, projectId: string, videoId: string, currentIdentityHash?: string) {
+  return database.prepare(
+    `SELECT final.*, run.identity_hash AS render_identity_hash, run.status AS run_status
+       FROM video_final_videos final
+       JOIN video_render_runs run ON run.id = final.run_id
+      WHERE final.project_id=? AND final.video_id=? AND run.status='succeeded'
+        AND (? IS NULL OR run.identity_hash <> ?)
+      ORDER BY final.created_at DESC, final.id DESC LIMIT 1`,
+  ).get(projectId, videoId, currentIdentityHash ?? null, currentIdentityHash ?? null) as (FinalRow & { render_identity_hash: string; run_status: string; }) | undefined;
+}
+
+function runRecord(database: DatabaseSync, row: RunRow | undefined, includeFinal = true) {
   if (!row) return null;
   const job = row.job_id ? getJob(database, row.job_id) : undefined;
   const counts = database.prepare(
@@ -78,7 +89,7 @@ function runRecord(database: DatabaseSync, row: RunRow | undefined) {
      FROM video_render_chunks WHERE run_id=?`,
   ).get(row.id) as { total: number; queued: number | null; running: number | null; succeeded: number | null;
     failed: number | null; cancelled: number | null };
-  const final = database.prepare("SELECT * FROM video_final_videos WHERE run_id=?").get(row.id) as FinalRow | undefined;
+  const final = includeFinal ? database.prepare("SELECT * FROM video_final_videos WHERE run_id=?").get(row.id) as FinalRow | undefined : undefined;
   return {
     id: row.id, status: row.status, jobId: row.job_id, progress: job?.progress ?? (row.status === "succeeded" ? 1 : 0),
     errorMessage: row.error_summary ?? job?.errorMessage ?? null,
@@ -117,6 +128,7 @@ export function getVideoRenderWorkspace(database: DatabaseSync, projectId: strin
     : database.prepare(
       "SELECT * FROM video_render_runs WHERE project_id=? AND video_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
     ).get(projectId, videoId) as RunRow | undefined;
+  const previous = latestPreviousFinal(database, projectId, videoId, readiness?.identityHash);
   return {
     readiness: {
       ready: readiness !== null, issues: issue ? [issue] : [], gates, spec: readiness?.params ?? videoRenderParams(database, projectId, videoId),
@@ -124,7 +136,13 @@ export function getVideoRenderWorkspace(database: DatabaseSync, projectId: strin
       durationMs: readiness?.timeline.audioDurationMs ?? 0,
       estimatedChunks: readiness?.timeline.segments.length ?? 0,
     },
-    render: runRecord(database, row),
+    // 当前时间轴失效时，旧 Run 只能作为 previousFinal 展示，不能继续冒充当前 final。
+    render: runRecord(database, row, readiness !== null),
+    previousFinal: previous ? {
+      id: previous.id, runId: previous.run_id, bytes: previous.bytes, fileHash: previous.file_hash,
+      mediaInfo: JSON.parse(previous.media_info_json) as unknown, createdAt: previous.created_at,
+      renderIdentityHash: previous.render_identity_hash, stale: true,
+    } : null,
   };
 }
 
@@ -227,13 +245,21 @@ async function hashHandle(handle: FileHandle, bytes: number) {
   return hash.digest("hex");
 }
 
-export async function openCurrentFinalVideo(database: DatabaseSync, dataRoot: string, projectId: string, videoId: string) {
-  const identity = videoRenderIdentity(database, projectId, videoId);
-  const finalIdentity = videoRenderSha256(canonical({ renderIdentity: identity.identityHash, stage: "final-v1" }));
+export async function openFinalVideo(database: DatabaseSync, dataRoot: string, projectId: string, videoId: string, runId?: string) {
+  const identity = runId ? (() => {
+    try { return videoRenderIdentity(database, projectId, videoId); } catch { return null; }
+  })() : videoRenderIdentity(database, projectId, videoId);
+  const run = runId
+    ? database.prepare("SELECT * FROM video_render_runs WHERE id=? AND project_id=? AND video_id=? AND status='succeeded'").get(runId, projectId, videoId) as RunRow | undefined
+    : undefined;
+  const renderIdentityHash = run?.identity_hash ?? identity?.identityHash;
+  if (!renderIdentityHash) throw new VideoRenderError(404, "当前视频尚无可播放的最终成片");
+  const finalIdentity = videoRenderSha256(canonical({ renderIdentity: renderIdentityHash, stage: "final-v1" }));
   const row = database.prepare(
     `SELECT final.* FROM video_final_videos final JOIN video_render_runs run ON run.id=final.run_id
-     WHERE final.project_id=? AND final.video_id=? AND run.identity_hash=? AND run.status='succeeded'`,
-  ).get(projectId, videoId, identity.identityHash) as FinalRow | undefined;
+     WHERE final.project_id=? AND final.video_id=? AND run.identity_hash=? AND run.status='succeeded'
+       ${runId ? "AND run.id=?" : ""}`,
+  ).get(...(runId ? [projectId, videoId, renderIdentityHash, runId] : [projectId, videoId, renderIdentityHash])) as FinalRow | undefined;
   if (!row) throw new VideoRenderError(404, "当前视频尚无可下载的最终成片");
   const directory = `videos/${videoId}/renders/final/${finalIdentity.slice(0, 2)}/${finalIdentity}`;
   if (row.identity_hash !== finalIdentity || row.relative_path !== `${directory}/video.mp4` ||
@@ -264,9 +290,11 @@ export async function openCurrentFinalVideo(database: DatabaseSync, dataRoot: st
     if (info.size !== row.bytes || await hashHandle(handle, row.bytes) !== row.file_hash) {
       throw new VideoRenderError(409, "最终视频文件与登记哈希不一致");
     }
-    if (videoRenderIdentity(database, projectId, videoId).identityHash !== identity.identityHash) {
+    if (!runId && videoRenderIdentity(database, projectId, videoId).identityHash !== identity?.identityHash) {
       throw new VideoRenderError(409, "最终视频复核期间上游身份已变化");
     }
     return { handle, bytes: row.bytes, fileHash: row.file_hash, mediaInfo: JSON.parse(row.media_info_json) as unknown };
   } catch (error) { await handle.close(); throw error; }
 }
+
+export const openCurrentFinalVideo = openFinalVideo;

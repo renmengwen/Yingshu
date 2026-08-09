@@ -1,4 +1,5 @@
-export const SUBTITLE_TIMELINE_CONTRACT = "subtitle-timeline-v2";
+// 每个 cue 只承载一行字幕；切分合同变更后，旧时间轴必须重新生成。
+export const SUBTITLE_TIMELINE_CONTRACT = "subtitle-timeline-v3";
 export const SUBTITLE_LINE_LIMIT = 16;
 
 export interface SubtitleUnit {
@@ -18,29 +19,13 @@ export interface SubtitleRenderProfile {
   height: number;
 }
 
-const MAX_UNIT_LENGTH = SUBTITLE_LINE_LIMIT * 2;
+const MAX_UNIT_LENGTH = SUBTITLE_LINE_LIMIT;
 const SPEAKABLE_TEXT = /[\p{L}\p{N}]/u;
 const SENTENCE_END = /[。！？!?；;…]/u;
 const SOFT_BREAK = /[，,、：:]/u;
-const PUNCTUATION = /[，。！？；：、,.!?;:…）》】」』]/u;
 
 function codePoints(text: string) {
   return [...text];
-}
-
-function wrapSubtitle(text: string) {
-  const characters = codePoints(text);
-  if (characters.length <= SUBTITLE_LINE_LIMIT) return text;
-  let best = Math.ceil(characters.length / 2);
-  let bestScore = Number.POSITIVE_INFINITY;
-  const first = Math.max(1, characters.length - SUBTITLE_LINE_LIMIT);
-  const last = Math.min(SUBTITLE_LINE_LIMIT, characters.length - 1);
-  for (let split = first; split <= last; split += 1) {
-    const score = Math.abs(split - (characters.length - split)) +
-      (PUNCTUATION.test(characters[split]!) ? 100 : 0);
-    if (score < bestScore) { best = split; bestScore = score; }
-  }
-  return `${characters.slice(0, best).join("")}\n${characters.slice(best).join("")}`;
 }
 
 function mergeUnspeakableUnits(units: string[]) {
@@ -92,7 +77,7 @@ export function splitNarration(text: string): SubtitleUnit[] {
     }
     return result;
   });
-  return mergeUnspeakableUnits(speechUnits).map((speechText) => ({ speechText, subtitleText: wrapSubtitle(speechText) }));
+  return mergeUnspeakableUnits(speechUnits).map((speechText) => ({ speechText, subtitleText: speechText }));
 }
 
 function srtTimestamp(ms: number) {

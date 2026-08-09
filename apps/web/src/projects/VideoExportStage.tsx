@@ -179,6 +179,18 @@ export function VideoExportStage({
               </dl>
             </section>
           ) : null}
+          {!final && workspace.previousFinal && state.previousStreamUrl ? (
+            <section className="mt-7 border-t border-[var(--border-subtle)] pt-6" aria-labelledby="previous-final-player-heading">
+              <h3 id="previous-final-player-heading" className="text-sm font-semibold">最近一次可播放成片</h3>
+              <p className="mt-2 border border-[var(--border-strong)] bg-[var(--bg-subtle)] p-3 text-xs leading-5 text-[var(--fg-secondary)]">
+                当前文案、图片或画面时间轴已经发生变化。下面是修改前的旧版本，仅供对照预览，不能作为当前版本导出。
+              </p>
+              <video className="mt-4 max-h-[70vh] w-full bg-black object-contain" style={{ aspectRatio: `${workspace.readiness.spec.width} / ${workspace.readiness.spec.height}` }} controls preload="metadata" src={state.previousStreamUrl}>
+                当前浏览器无法播放旧版本 MP4，请使用下载按钮保存文件。
+              </video>
+              {state.previousDownloadUrl ? <a className={`${secondaryButton} mt-3 w-full`} href={state.previousDownloadUrl} download>下载旧版本 MP4</a> : null}
+            </section>
+          ) : null}
         </div>
 
         <aside className="p-5 md:p-7">

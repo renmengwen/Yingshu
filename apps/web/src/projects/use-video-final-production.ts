@@ -159,5 +159,7 @@ export function useVideoRenderExport(projectId: string, videoId: string) {
     startRender: () => perform("render", "正在创建最终渲染任务…", () => jsonRequest(`${base}/renders`, json({})), "最终渲染任务已创建。页面会持续恢复真实分片状态。"),
     cancelRender: () => workspace?.render ? perform("cancel", "正在请求中断最终渲染…", () => jsonRequest(`${base}/renders/${encodeURIComponent(workspace.render!.id)}/cancel`, json({})), "渲染中断请求已记录，已成功分片会保留。") : Promise.resolve(),
     streamUrl: `${base}/final-video`, downloadUrl: `${base}/final-video/download`,
+    previousStreamUrl: workspace?.previousFinal ? `${base}/previous-final-video?runId=${encodeURIComponent(workspace.previousFinal.runId)}` : undefined,
+    previousDownloadUrl: workspace?.previousFinal ? `${base}/previous-final-video/download?runId=${encodeURIComponent(workspace.previousFinal.runId)}` : undefined,
   };
 }

@@ -95,13 +95,13 @@ test("批准稿按真实音频段建立可恢复时间轴并复用内容寻址�
       timelineHash: string; durationMs: number; segmentCount: number; cueCount: number;
       srtRelativePath: string; assRelativePath: string; reusedSegments: number;
     };
-    assert.equal(result.durationMs, 3_750);
-    assert.equal(result.segmentCount, 3);
-    assert.equal(result.cueCount, 3);
-    assert.equal(result.reusedSegments, 0);
+    assert.equal(result.durationMs, 5_000);
+    assert.equal(result.segmentCount, 4);
+    assert.equal(result.cueCount, 4);
+    assert.equal(result.reusedSegments, 1);
     assert.equal(connection.database.prepare(
       "SELECT COUNT(*) AS count FROM audio_segments WHERE timeline_hash = ?",
-    ).get(result.timelineHash)!.count, 3);
+    ).get(result.timelineHash)!.count, 4);
     const cues = connection.database.prepare(
       "SELECT start_ms, end_ms FROM subtitle_cues WHERE timeline_hash = ? ORDER BY cue_index",
     ).all(result.timelineHash) as unknown as Array<{ start_ms: number; end_ms: number }>;
@@ -109,6 +109,7 @@ test("批准稿按真实音频段建立可恢复时间轴并复用内容寻址�
       { start_ms: 0, end_ms: 1_250 },
       { start_ms: 1_250, end_ms: 2_500 },
       { start_ms: 2_500, end_ms: 3_750 },
+      { start_ms: 3_750, end_ms: 5_000 },
     ]);
     assert.match(await readFile(join(dataRoot, result.srtRelativePath), "utf8"), /00:00:01,250 --> 00:00:02,500/);
     assert.match(await readFile(join(dataRoot, result.assRelativePath), "utf8"), /PlayResY: 1920/);
@@ -117,7 +118,7 @@ test("批准稿按真实音频段建立可恢复时间轴并复用内容寻址�
     assert.equal(repeated.status, "succeeded");
     assert.equal(syntheses, 3);
     assert.equal((repeated.result as { timelineHash: string }).timelineHash, result.timelineHash);
-    assert.equal((repeated.result as { reusedSegments: number }).reusedSegments, 3);
+    assert.equal((repeated.result as { reusedSegments: number }).reusedSegments, 4);
 
     const changedVoice = await run({ episodeId: "episode_tts", voice: "测试音色" });
     assert.equal(changedVoice.status, "succeeded");
